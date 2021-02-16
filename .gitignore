@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# External GitHub repositories
+rpg_asynet
+
 # C extensions
 *.so
 
