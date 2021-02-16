@@ -3,3 +3,10 @@ repositories:
     type: git
     url: git@github.com:uzh-rpg/rpg_asynet.git
     version: master
+  SparseConvNet:
+    type: git
+    url: git@github.com:facebookresearch/SparseConvNet.git
+    version: master
+  rpg_asynet/async_sparse_py/include/eigen:
+    type: git
+    url: git@gitlab.com:libeigen/eigen.git
