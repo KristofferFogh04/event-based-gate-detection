@@ -10,7 +10,7 @@ First set up an [Anaconda](https://www.anaconda.com/) environment:
 
 Then clone the repository and install the dependencies with pip
 
-    git clone git@github.com:KristofferFogh04/event-based-gate-detection.git
+    git clone https://github.com/KristofferFogh04/event-based-gate-detection.git
     cd event-based-gate-detection/
     pip install -r requirements.txt
     
