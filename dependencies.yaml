@@ -1,0 +1,5 @@
+repositories:
+  rpg_asynet:
+    type: git
+    url: git@github.com:uzh-rpg/rpg_asynet.git
+    version: master
