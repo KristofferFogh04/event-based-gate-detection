@@ -13,16 +13,19 @@ echo Installing pytorch through conda
 conda install pytorch torchvision cudatoolkit=10.0 -c pytorch 
 
 echo Installing SparseConvNet
-bash SparseConvNet/develop.sh
+cd SparseConvNet
+bash develop.sh
 
 echo Cloning Eigen
-git clone https://gitlab.com/libeigen/eigen.git rpg_asynet/async_sparse_py/include
+cd ..
+git clone https://gitlab.com/libeigen/eigen.git rpg_asynet/async_sparse_py/include/eigen
 
 echo Installing event_representation_tool
-pip install rpg_asynet/event_representation_tool/
+cd rpg_asynet
+pip install event_representation_tool/
 
 echo Installing pybind11
 conda install -c conda-forge pybind11
 
 echo Installing async_sparse_py
-pip install rpg_asynet/async_sparse_py
+pip install async_sparse_py/
