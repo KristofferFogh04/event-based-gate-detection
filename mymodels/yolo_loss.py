@@ -1,8 +1,8 @@
 import torch
 
-from models.yolo_detection import yoloParseOutput
-from models.yolo_detection import yoloDetect
-from models.yolo_detection import getGrid
+from mymodels.yolo_detection import yoloParseOutput
+from mymodels.yolo_detection import yoloDetect
+from mymodels.yolo_detection import getGrid
 
 
 def yoloLoss(model_output, bounding_box, input_shape):

@@ -3,9 +3,9 @@ Example usage: CUDA_VISIBLE_DEVICES=1, python train.py --settings_file "config/s
 """
 import argparse
 
-from config.settings import Settings
-from training.trainer import SparseObjectDetModel
-#from training.trainer import DenseObjectDetModel
+from myconfig.settings import Settings
+from mytraining.trainer import SparseObjectDetModel
+from mytraining.trainer import DenseObjectDetModel
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
     settings_filepath = args.settings_file
 
     settings = Settings(settings_filepath, generate_log=True)
-    """
+    
     if settings.model_name == 'fb_sparse_vgg':
         trainer = FBSparseVGGModel(settings)
     elif settings.model_name == 'dense_vgg':
@@ -27,7 +27,7 @@ def main():
         trainer = DenseObjectDetModel(settings)
     else:
         raise ValueError('Model name %s specified in the settings file is not implemented' % settings.model_name)
-    """
+    
 
     trainer = SparseObjectDetModel(settings)
     trainer.train()

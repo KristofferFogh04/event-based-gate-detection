@@ -7,12 +7,13 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-import dataloader.dataset
-from dataloader.loader import Loader
-from models.sparse_gatenet import SparseVGGGateNet
-from models.yolo_loss import yoloLoss
-from models.yolo_detection import yoloDetect
-from models.yolo_detection import nonMaxSuppression
+from mydataloader import dataset
+from mydataloader.loader import Loader
+from mymodels.sparse_gatenet import SparseVGGGateNet
+from mymodels.facebook_sparse_object_det import FBSparseObjectDet
+from mymodels.yolo_loss import yoloLoss
+from mymodels.yolo_detection import yoloDetect
+from mymodels.yolo_detection import nonMaxSuppression
 
 from rpg_asynet.utils.statistics_pascalvoc import BoundingBoxes, BoundingBox, BBType, VOC_Evaluator, MethodAveragePrecision
 import rpg_asynet.utils.visualizations as visualizations
@@ -39,7 +40,7 @@ class AbstractTrainer(abc.ABC):
         elif self.settings.event_representation == 'event_queue':
             self.nr_input_channels = 30
 
-        self.dataset_builder = dataloader.dataset.getDataloader(self.settings.dataset_name)
+        self.dataset_builder = dataset.getDataloader(self.settings.dataset_name)
         self.dataset_loader = Loader
 
         self.writer = SummaryWriter(self.settings.ckpt_dir)
@@ -219,7 +220,7 @@ class AbstractTrainer(abc.ABC):
 class SparseObjectDetModel(AbstractTrainer):
     def buildModel(self):
         """Creates the specified model"""
-        self.model = SparseVGGGateNet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+        self.model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'NCaltech101_ObjectDetection'))
         self.model.to(self.settings.gpu_device)
         self.model_input_size = self.model.spatial_size  # [191, 255]
@@ -383,6 +384,7 @@ class SparseObjectDetModel(AbstractTrainer):
         self.saveValidationStatisticsObjectDetection()
         self.writer.add_image('Validation/Input Histogram', val_images, self.epoch_step, dataformats='NHWC')
 
+        print("ValAcc: " + str(self.validation_accuracy))
         if self.max_validation_accuracy < self.validation_accuracy:
             self.max_validation_accuracy = self.validation_accuracy
             self.saveCheckpoint()

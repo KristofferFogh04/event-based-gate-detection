@@ -7,8 +7,8 @@ from os.path import join
 import event_representations as er
 from numpy.lib import recfunctions as rfn
 
-from dataloader.prophesee import dat_events_tools
-from dataloader.prophesee import npy_events_tools
+from mydataloader.prophesee import dat_events_tools
+from mydataloader.prophesee import npy_events_tools
 
 
 def random_shift_events(events, max_shift=20, resolution=(180, 240), bounding_box=None):
