@@ -8,6 +8,10 @@ rpg_asynet/
 SparseConvNet/
 eigen/
 
+# Data and logs
+data/
+log/
+
 # C extensions
 *.so
 

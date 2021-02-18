@@ -24,8 +24,8 @@ dataset:
 dir:
   log: 'log/'
 model:
-  # ['fb_sparse_vgg', 'dense_vgg', 'fb_sparse_object_det', 'dense_object_det']
-  model_name: 'sparse_gatenet'
+  # ['fb_sparse_vgg', 'dense_vgg', 'fb_sparse_object_det', 'dense_object_det', 'sparse_gatenet']
+  model_name: 'fb_sparse_object_det'
 optim:
   batch_size: 30
   init_lr: 1e-4
@@ -37,9 +37,9 @@ checkpoint:
   resume_file: ''
   # Networks trained for classification can be reused as starting point for object detection networks on trained
   # the same dataset
-  use_pretrained: False
+  use_pretrained: True
   pretrained_dense_vgg: ''
-  pretrained_sparse_vgg: ''
+  pretrained_sparse_vgg: 'log/trained-NCaltech/checkpoints/model_step_25.pth'
 hardware:
   # num_cpu_workers: {-1: auto, 0: main thread, >0: ...}
   num_cpu_workers: -1
