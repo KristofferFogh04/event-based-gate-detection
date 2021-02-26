@@ -8,7 +8,6 @@ class FBSparseObjectDet(nn.Module):
         super(FBSparseObjectDet, self).__init__()
         self.nr_classes = nr_classes
         self.nr_box = nr_box
-        self.linear = [None]*2
 
         sparse_out_channels = 256
         self.sparseModel = scn.SparseVggNet(2, nInputPlanes=nr_input_channels, layers=[
@@ -30,16 +29,16 @@ class FBSparseObjectDet(nn.Module):
         self.spatial_size = self.sparseModel.input_spatial_size(torch.LongTensor(self.cnn_spatial_output_size))
         self.inputLayer = scn.InputLayer(dimension=2, spatial_size=self.spatial_size, mode=2)
         self.linear_input_features = spatial_size_product * 256
-        self.linear[0] = nn.Linear(self.linear_input_features, 1024)
-        self.linear[1] = nn.Linear(1024, spatial_size_product*(nr_classes + 5*self.nr_box))
+        self.linear_1 = nn.Linear(self.linear_input_features, 1024)
+        self.linear_2 = nn.Linear(1024, spatial_size_product*(nr_classes + 5*self.nr_box))
 
     def forward(self, x):
         x = self.inputLayer(x)
         x = self.sparseModel(x)
         x = x.view(-1, self.linear_input_features)
-        x = self.linear[0](x)
+        x = self.linear_1(x)
         x = torch.relu(x)
-        x = self.linear[1](x)
+        x = self.linear_2(x)
         x = x.view([-1] + self.cnn_spatial_output_size + [(self.nr_classes + 5*self.nr_box)])
 
         return x

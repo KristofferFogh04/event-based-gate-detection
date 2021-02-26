@@ -53,7 +53,7 @@ class TestSparseVGG():
             fb_model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'NCaltech101_ObjectDetection')).eval()
             spatial_dimensions = fb_model.spatial_size
-            pth = 'log/trained-Prophesee/checkpoints/model_step_29.pth'
+            pth = 'log/trained-Prophesee/checkpoints/model_step_11.pth'
             fb_model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
             print("initialized sync fb model")
@@ -95,7 +95,7 @@ class TestSparseVGG():
             input_histogram = torch.zeros(list_spatial_dimensions + [2])
             step_size = event_window // sequence_length
 
-            # Detect using synchronous fb network
+            # Detect using synchronous fb network on the whole batch
             fb_output = fb_model([locations, features])
 
             fb_detected_bbox = yoloDetect(fb_output, self.model_input_size.to(fb_output.device),
@@ -126,12 +126,10 @@ class TestSparseVGG():
                     asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
                     asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
 
-            print("FB: ")
-            print(fb_detected_bbox)
-            print("ASYN:")
-            print(asyn_detected_bbox)
-
-
+            #print("FB: ")
+            #print(fb_detected_bbox)
+            #print("ASYN:")
+            #print(asyn_detected_bbox)
 
             batch_one_mask = locations[:, -1] == 0
             vis_locations = locations[batch_one_mask, :2]
@@ -167,82 +165,6 @@ class TestSparseVGG():
             file_path = os.path.join(self.settings.ckpt_dir, 'test_results.pth')
             torch.save({'state_dict': fb_model.state_dict()}, file_path)
 
-        if fb_output.ndim == 4:
-            np.testing.assert_almost_equal(asyn_output.float().data.cpu().numpy(),
-                                           fb_output.squeeze(0).detach().numpy().transpose(1, 2, 0), decimal=5)
-        else:
-            np.testing.assert_almost_equal(asyn_output.float().data.cpu().numpy(),
-                                           fb_output.squeeze(0).detach().numpy(), decimal=5)
-
-
-
-    def createInputs(self, events, nr_events_timestep, spatial_dimensions, sliding_window_size, fn_generateAsynInput):
-        """Creates for each timestep the input according to sliding window histogram"""
-        start_windows = [nr_events - sliding_window_size for nr_events in nr_events_timestep]
-        changing_timesteps = start_windows + nr_events_timestep
-        changing_timesteps.sort()
-
-        tensor_spatial_dimensions = torch.tensor(spatial_dimensions)
-        change_histogram = torch.zeros([len(changing_timesteps)-1] + spatial_dimensions + [self.nr_input_channels])
-
-        for i_change in range(len(changing_timesteps) - 1):
-            nr_changing_events = changing_timesteps[i_change+1] - changing_timesteps[i_change]
-            batch_events = events[changing_timesteps[i_change]:changing_timesteps[i_change+1]]
-            update_locations, new_histogram = fn_generateAsynInput(batch_events, tensor_spatial_dimensions,
-                                                                   original_shape=[self.settings.height,
-                                                                                   self.settings.width])
-            # As input image dimension is upsampled, the number of new events can be increased as well.
-            np.random.seed(7)
-            random_permutation = np.random.permutation(update_locations.shape[0])
-            idx_discard = random_permutation[:-nr_changing_events]
-            new_histogram[update_locations[idx_discard, 0],
-                          update_locations[idx_discard, 1], :] = torch.tensor([0, 0]).float()
-            # update_locations = update_locations[random_permutation[-nr_changing_events:], :]
-
-            change_histogram[i_change, :, :, :2] = new_histogram
-
-        new_histogram = torch.zeros([len(nr_events_timestep)] + spatial_dimensions + [self.nr_input_channels])
-        input_histogram = torch.zeros([len(nr_events_timestep)] + spatial_dimensions + [self.nr_input_channels])
-        input_update_locations = []
-
-        for i_timestep in range(len(nr_events_timestep)):
-            if nr_events_timestep[i_timestep] - start_windows[i_timestep] < 0:
-                raise ValueError('Sliding window is not full. Change nr_events_timestep')
-            start_idx_changing = changing_timesteps.index(start_windows[i_timestep])
-            end_idx_changing = changing_timesteps.index(nr_events_timestep[i_timestep])
-
-            input_histogram[i_timestep] = change_histogram[start_idx_changing:end_idx_changing, :, :, :].sum(0)
-            # if i_timestep=0, the input_histogram[i_timestep - 1] = input_histogram[-1], which is zero
-            new_histogram[i_timestep] = input_histogram[i_timestep] - input_histogram[i_timestep-1]
-
-            update_locations, _ = AbstractTrainer.denseToSparse(torch.tensor(new_histogram[i_timestep].unsqueeze(0)**2,
-                                                                             requires_grad=False))
-
-            # Catch cases, where the input is downsampled and no update locations are found
-            if update_locations.shape[0] <= 1 and self.settings.dataset_name == 'Prophese':
-                # Use final event as location
-                nr_events_insert = 2 - update_locations.shape[0]
-                end_event_idx = nr_events_timestep[i_timestep] + 2
-                add_events = events[end_event_idx:(end_event_idx + nr_events_insert)].astype(np.float)
-                add_events[:, 0] *= spatial_dimensions[1] / self.settings.width
-                add_events[:, 1] *= spatial_dimensions[0] / self.settings.height
-                add_events = np.floor(add_events).astype(np.int)
-                update_locations = torch.cat([update_locations, torch.zeros([nr_events_insert, 3], dtype=torch.long)],
-                                             dim=0)
-                update_locations[-nr_events_insert:, 0] = torch.from_numpy(add_events[:, 1])
-                update_locations[-nr_events_insert:, 1] = torch.from_numpy(add_events[:, 0])
-
-            input_update_locations.append(update_locations)
-
-        return input_histogram, input_update_locations, new_histogram
-
-    def createSparseInput(self, input_histogram):
-        update_locations, features = AbstractTrainer.denseToSparse(input_histogram.unsqueeze(0))
-        x_sparse = [None] * 5
-        x_sparse[0] = update_locations[:, :2].to(device)
-        x_sparse[1] = input_histogram.to(device)
-
-        return x_sparse
 
 
 def main():
