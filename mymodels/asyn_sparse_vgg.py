@@ -123,9 +123,15 @@ class asynSparseVGG:
                 self.asyn_layers[j].eval()
                 fb_model.sparseModel[j].eval()
             if layer_name == 'ClassicFC':
-                self.asyn_layers[j].weight.data = fb_model.linear[linearnum].weight.data.double().to(self.device)
-                self.asyn_layers[j].bias.data = fb_model.linear[linearnum].bias.data.double().to(self.device)
-                linearnum += 1
+                if linearnum == 0:
+                    self.asyn_layers[j].weight.data = fb_model.linear_1.weight.data.double().to(self.device)
+                    self.asyn_layers[j].bias.data = fb_model.linear_1.bias.data.double().to(self.device)
+                    linearnum += 1
+                elif linearnum == 1:
+                    self.asyn_layers[j].weight.data = fb_model.linear_2.weight.data.double().to(self.device)
+                    self.asyn_layers[j].bias.data = fb_model.linear_2.bias.data.double().to(self.device)
+                    linearnum += 1
+
 
     def generateAsynInput(self, new_batch_events, spatial_dimensions, original_shape):
         """Generates the asynchronous input for the sparse VGG, which is consistent with training input"""
