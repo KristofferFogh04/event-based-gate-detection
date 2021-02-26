@@ -8,7 +8,6 @@ class FBSparseObjectDet(nn.Module):
         super(FBSparseObjectDet, self).__init__()
         self.nr_classes = nr_classes
         self.nr_box = nr_box
-        self.linear = [None]*2
 
         sparse_out_channels = 256
         self.sparseModel = scn.SparseVggNet(2, nInputPlanes=nr_input_channels, layers=[
