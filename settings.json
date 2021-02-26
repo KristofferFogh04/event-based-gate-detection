@@ -1,0 +1,46 @@
+{
+    "SeeDocsAt": "https://github.com/Microsoft/AirSim/blob/master/docs/settings.md",
+    "SettingsVersion": 1.2,
+    "SimMode": "Multirotor",
+    "ViewMode": "NoDisplay",
+    "ClockSpeed": 1.0,
+    "Vehicles": {
+        "PX4": {
+            "VehicleType": "PX4Multirotor",
+            "UseSerial": false,
+            "UseTcp": true,
+            "TcpPort": 4560,
+            "ControlPort": 14580,
+            "params": {
+                "NAV_RCL_ACT": 0,
+                "NAV_DLL_ACT": 0,
+                "LPE_LAT": 56.206180,
+                "LPE_LON": 10.187857,
+                "COM_OBL_ACT": 1
+            }     
+        }
+    },
+    "CameraDefaults": {
+    "CaptureSettings": [
+      {
+        "ImageType": 0,
+        "Width": 304,
+        "Height": 240,
+        "FOV_Degrees": 90,
+        "AutoExposureSpeed": 100,
+        "AutoExposureBias": 0,
+        "AutoExposureMaxBrightness": 0.64,
+        "AutoExposureMinBrightness": 0.03,
+        "MotionBlurAmount": 0,
+        "TargetGamma": 1.0,
+        "ProjectionMode": "",
+        "OrthoWidth": 5.12
+      }
+    ]
+},
+    "OriginGeopoint": {
+        "Latitude": 56.206180,
+        "Longitude": 10.187857,
+        "Altitude": 10
+    }
+}
