@@ -30,10 +30,14 @@ class Settings:
             dataset = settings['dataset']
             self.dataset_name = dataset['name']
             self.event_representation = dataset['event_representation']
-            if self.dataset_name == 'NCaltech101_ObjectDetection':
+            if self.dataset_name == 'NCaltech101':
+                dataset_specs = dataset['ncaltech101']
+            elif self.dataset_name == 'NCaltech101_ObjectDetection':
                 dataset_specs = dataset['ncaltech101_objectdetection']
             elif self.dataset_name == 'Prophesee':
                 dataset_specs = dataset['prophesee']
+            elif self.dataset_name == 'NCars':
+                dataset_specs = dataset['ncars']
 
             self.dataset_path = dataset_specs['dataset_path']
             assert os.path.isdir(self.dataset_path)

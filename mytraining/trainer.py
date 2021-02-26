@@ -11,6 +11,7 @@ from mydataloader import dataset
 from mydataloader.loader import Loader
 from mymodels.sparse_gatenet import SparseVGGGateNet
 from mymodels.facebook_sparse_object_det import FBSparseObjectDet
+from mymodels.facebook_sparse_vgg import FBSparseVGG
 from mymodels.yolo_loss import yoloLoss
 from mymodels.yolo_detection import yoloDetect
 from mymodels.yolo_detection import nonMaxSuppression
@@ -215,6 +216,130 @@ class AbstractTrainer(abc.ABC):
         file_path = os.path.join(self.settings.ckpt_dir, 'model_step_' + str(self.epoch_step) + '.pth')
         torch.save({'state_dict': self.model.state_dict(), 'optimizer': self.optimizer.state_dict(),
                     'epoch': self.epoch_step}, file_path)
+
+
+
+class FBSparseVGGModel(AbstractTrainer):
+    def buildModel(self):
+        """Creates the specified model"""
+        self.model = FBSparseVGG(self.nr_classes, self.nr_input_channels,
+                                 vgg_12=(self.settings.dataset_name == 'NCars'))
+        self.model.to(self.settings.gpu_device)
+        self.model_input_size = self.model.spatial_size
+
+    def train(self):
+        """Main training and validation loop"""
+        while True:
+            if (self.epoch_step % 5) == 0:
+                self.validationEpoch()
+            self.trainEpoch()
+
+            self.epoch_step += 1
+            self.scheduler.step()
+
+    def trainEpoch(self):
+        self.pbar = tqdm.tqdm(total=self.nr_train_epochs, unit='Batch', unit_scale=True)
+        self.model = self.model.train()
+        self.training_loss = 0
+        self.training_accuracy = 0
+        loss_function = nn.CrossEntropyLoss()
+
+        for i_batch, sample_batched in enumerate(self.train_loader):
+            _, labels, histogram = sample_batched
+            self.optimizer.zero_grad()
+
+            # Change size to input size of sparse VGG
+            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(self.model_input_size))
+            histogram = histogram.permute(0, 2, 3, 1)
+            locations, features = self.denseToSparse(histogram)
+
+            model_output = self.model([locations, features, histogram.shape[0]])
+
+            loss = loss_function(model_output, target=labels)
+
+            # Save training statistics
+            predicted_classes = model_output.argmax(1)
+            accuracy = (predicted_classes == labels).float().mean()
+            self.training_accuracy += accuracy.data.cpu().numpy()
+            self.training_loss += loss.data.cpu().numpy()
+
+            loss.backward()
+            self.optimizer.step()
+
+            # Visualization
+            # events_sample1 = events[events[:, -1] == 0, :-1]
+            # file_path = os.path.join(self.settings.vis_dir, 'image_' + str(self.batch_step) + '.png')
+            # visualizations.visualizeEventsTime(events_sample1.data.cpu().numpy(), self.settings.height,
+            #                                    self.settings.width, path_name=file_path, last_k_events=None)
+            if self.batch_step % (self.nr_train_epochs * 50) == 0:
+                batch_one_mask = locations[:, -1] == 0
+                vis_locations = locations[batch_one_mask, :2]
+                features = features[batch_one_mask, :]
+
+                # file_path = os.path.join(self.settings.vis_dir, 'image_' + str(self.batch_step) + '.png')
+                # visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
+                #                                   features=features.cpu().numpy(), path_name=file_path)
+
+                image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
+                                                          features=features.cpu().numpy())
+                self.writer.add_image('Training/Input Histogram', image, self.epoch_step, dataformats='HWC')
+
+            self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
+            self.pbar.update(1)
+            self.batch_step += 1
+
+        self.writer.add_scalar('Training/Training_Accuracy', self.training_accuracy / float(self.nr_train_epochs),
+                               self.epoch_step)
+        self.writer.add_scalar('Training/Training_Loss', self.training_loss / float(self.nr_train_epochs),
+                               self.epoch_step)
+        self.writer.add_scalar('Training/Learning_Rate', self.getLearningRate(), self.epoch_step)
+        self.pbar.close()
+
+    def validationEpoch(self):
+        self.pbar = tqdm.tqdm(total=self.nr_val_epochs, unit='Batch', unit_scale=True)
+        self.resetValidation()
+        self.model = self.model.eval()
+        loss_function = nn.CrossEntropyLoss()
+
+        for i_batch, sample_batched in enumerate(self.val_loader):
+            _, labels, histogram = sample_batched
+
+            # Convert spatial dimension to model input size
+            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(self.model_input_size))
+            histogram = histogram.permute(0, 2, 3, 1)
+            locations, features = self.denseToSparse(histogram)
+
+            with torch.no_grad():
+                model_output = self.model([locations, features, histogram.shape[0]])
+
+            loss = loss_function(model_output, target=labels)
+
+            # Save validation statistics
+            predicted_classes = model_output.argmax(1)
+            accuracy = (predicted_classes == labels).float().mean()
+            self.validation_loss += loss.data.cpu().numpy()
+            self.validation_accuracy += accuracy.data.cpu().numpy()
+            np.add.at(self.val_confusion_matrix, (predicted_classes.data.cpu().numpy(), labels.data.cpu().numpy()), 1)
+
+            # Visualization
+            # events_sample1 = events[events[:, -1] == 0, :-1]
+            # file_path = os.path.join(self.settings.vis_dir, 'image_' + str(self.batch_step) + '.png')
+            # visualizations.visualizeEventsTime(events_sample1.data.cpu().numpy(), self.settings.height,
+            #                                    self.settings.width, path_name=file_path, last_k_events=None)
+
+            self.pbar.set_postfix(ValLoss=loss.data.cpu().numpy())
+            self.pbar.update(1)
+            self.val_batch_step += 1
+
+        self.validation_loss = self.validation_loss / float(self.val_batch_step)
+        self.validation_accuracy = self.validation_accuracy / float(self.val_batch_step)
+        self.saveValidationStatistics()
+
+        if self.max_validation_accuracy < self.validation_accuracy:
+            self.max_validation_accuracy = self.validation_accuracy
+            self.saveCheckpoint()
+
+        self.pbar.close()
 
 
 class SparseObjectDetModel(AbstractTrainer):
@@ -443,12 +568,15 @@ class DenseObjectDetModel(AbstractTrainer):
             # Change size to input size of sparse VGG
             histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2),
                                                         torch.Size(self.model_input_size))
-
+            print("raw: ")
+            print(bounding_box)
             # Change x, width and y, height
             bounding_box[:, :, [0, 2]] = (bounding_box[:, :, [0, 2]] * self.model_input_size[1].float()
                                        / self.settings.width).long()
             bounding_box[:, :, [1, 3]] = (bounding_box[:, :, [1, 3]] * self.model_input_size[0].float()
                                        / self.settings.height).long()
+            print("mod: ")
+            print(bounding_box)
 
             # Deep Learning Magic
             model_output = self.model(histogram)

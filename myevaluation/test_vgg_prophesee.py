@@ -53,7 +53,7 @@ class TestSparseVGG():
             fb_model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'NCaltech101_ObjectDetection')).eval()
             spatial_dimensions = fb_model.spatial_size
-            pth = 'log/trained-Prophesee/checkpoints/model_step_11.pth'
+            pth = 'log/prophesee_trained_200epochs/checkpoints/model_step_181.pth'
             fb_model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
             print("initialized sync fb model")
@@ -73,7 +73,7 @@ class TestSparseVGG():
             print("initialized asyn vgg model")
 
             # ---- Create Input -----
-            event_window = 1000
+            event_window = 25000
             sequence_length = 10
 
             dataloader = getDataloader(self.settings.dataset_name)
@@ -82,95 +82,135 @@ class TestSparseVGG():
                                             nr_events_window=event_window, shuffle=True)
             self.object_classes = test_dataset.object_classes
 
-            events, labels, histogram = test_dataset.__getitem__(0)
-
-            # Histogram for synchronous network
-            histogram = torch.from_numpy(histogram[np.newaxis, :, :])
-            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(spatial_dimensions))
-            histogram = histogram.permute(0, 2, 3, 1)
-            locations, features = AbstractTrainer.denseToSparse(histogram)
+            counter = 1
 
 
-            list_spatial_dimensions = [spatial_dimensions.cpu().numpy()[0], spatial_dimensions.cpu().numpy()[1]]
-            input_histogram = torch.zeros(list_spatial_dimensions + [2])
-            step_size = event_window // sequence_length
+            for i_batch, sample_batched in enumerate(test_dataset):
 
-            # Detect using synchronous fb network on the whole batch
-            fb_output = fb_model([locations, features])
+                events, bounding_box, histogram = sample_batched
+                print("gt: ")
+                print(bounding_box)
 
-            fb_detected_bbox = yoloDetect(fb_output, self.model_input_size.to(fb_output.device),
-                   threshold=0.3)
+                print("Step: " + str(counter))
 
-            fb_detected_bbox = nonMaxSuppression(fb_detected_bbox, iou=0.6)
-            fb_detected_bbox = fb_detected_bbox.long().cpu().numpy()
-
-
-            with torch.no_grad():
-                for i_sequence, nr_events in enumerate(self.nr_events_timestep):
-
-                    #Generate input reprensetation for asynchrnonous network
-                    new_batch_events = events[(step_size*i_sequence):(step_size*(i_sequence + 1)), :]
-                    update_locations, new_histogram = asyn_model.generateAsynInput(new_batch_events, spatial_dimensions,
-                                                                           original_shape=[self.settings.height, self.settings.width])
-                    input_histogram = input_histogram + new_histogram
-                    x_asyn = [None] * 5
-                    x_asyn[0] = update_locations[:, :2].to(device)
-                    x_asyn[1] = input_histogram.to(device)
+                # Histogram for synchronous network
+                histogram = torch.from_numpy(histogram[np.newaxis, :, :])
+                histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(spatial_dimensions))
+                histogram = histogram.permute(0, 2, 3, 1)
+                locations, features = AbstractTrainer.denseToSparse(histogram)
 
 
-                    # Detect using async network
-                    asyn_output1 = asyn_model.forward(x_asyn)
-                    asyn_output = asyn_output1[1].view([-1] + [6,8] + [(self.nr_classes + 5*self.nr_input_channels)])
-                    asyn_detected_bbox = yoloDetect(asyn_output.float(), self.model_input_size.to(asyn_output.device),
-                           threshold=0.3)
-                    asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
-                    asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
+                list_spatial_dimensions = [spatial_dimensions.cpu().numpy()[0], spatial_dimensions.cpu().numpy()[1]]
+                input_histogram = torch.zeros(list_spatial_dimensions + [2])
+                step_size = event_window // sequence_length
 
-            #print("FB: ")
-            #print(fb_detected_bbox)
-            #print("ASYN:")
-            #print(asyn_detected_bbox)
+                # Detect using synchronous fb network on the whole batch
+                fb_output = fb_model([locations, features])
 
-            batch_one_mask = locations[:, -1] == 0
-            vis_locations = locations[batch_one_mask, :2]
-            features = features[batch_one_mask, :]
-            vis_detected_bbox = fb_detected_bbox[fb_detected_bbox[:, 0] == 0, 1:-2].astype(np.int)
+                fb_detected_bbox = yoloDetect(fb_output, self.model_input_size.to(fb_output.device),
+                       threshold=0.3)
 
-            image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
-                                                      features=features.cpu().numpy())
+                fb_detected_bbox = nonMaxSuppression(fb_detected_bbox, iou=0.6)
+                fb_detected_bbox = fb_detected_bbox.long().cpu().numpy()
 
-            image = visualizations.drawBoundingBoxes(image, vis_detected_bbox[:, :-1],
-                                                    class_name=[self.object_classes[i]
-                                                                for i in fb_detected_bbox[:, -1]],
-                                                     ground_truth=False, rescale_image=True)
-
-            self.writer.add_image('FB', image, 1, dataformats='HWC')
+                print("fb: ")
+                print(fb_detected_bbox)
 
 
-            batch_one_mask = locations[:, -1] == 0
-            vis_locations = locations[batch_one_mask, :2]
-            features = features[batch_one_mask, :]
-            vis_detected_bbox = asyn_detected_bbox[asyn_detected_bbox[:, 0] == 0, 1:-2].astype(np.int)
+                with torch.no_grad():
+                    for i_sequence, nr_events in enumerate(self.nr_events_timestep):
 
-            image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
-                                                      features=features.cpu().numpy())
+                        #Generate input reprensetation for asynchrnonous network
+                        new_batch_events = events[(step_size*i_sequence):(step_size*(i_sequence + 1)), :]
+                        update_locations, new_histogram = asyn_model.generateAsynInput(new_batch_events, spatial_dimensions,
+                                                                               original_shape=[self.settings.height, self.settings.width])
+                        input_histogram = input_histogram + new_histogram
+                        x_asyn = [None] * 5
+                        x_asyn[0] = update_locations[:, :2].to(device)
+                        x_asyn[1] = input_histogram.to(device)
 
-            image = visualizations.drawBoundingBoxes(image, vis_detected_bbox[:, :-1],
-                                                    class_name=[self.object_classes[i]
-                                                                for i in asyn_detected_bbox[:, -1]],
-                                                     ground_truth=False, rescale_image=True)
 
-            self.writer.add_image('ASYN', image, 1, dataformats='HWC')
+                        # Detect using async network
+                        asyn_output1 = asyn_model.forward(x_asyn)
+                        asyn_output = asyn_output1[1].view([-1] + [6,8] + [(self.nr_classes + 5*self.nr_input_channels)])
+                        asyn_detected_bbox = yoloDetect(asyn_output.float(), self.model_input_size.to(asyn_output.device),
+                               threshold=0.3)
+                        asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
+                        asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
 
-            file_path = os.path.join(self.settings.ckpt_dir, 'test_results.pth')
-            torch.save({'state_dict': fb_model.state_dict()}, file_path)
+                #print("FB: ")
+                #print(fb_detected_bbox)
+                #print("ASYN:")
+                #print(asyn_detected_bbox)
+
+                batch_one_mask = locations[:, -1] == 0
+                vis_locations = locations[batch_one_mask, :2]
+                features = features[batch_one_mask, :]
+                vis_detected_bbox = fb_detected_bbox[fb_detected_bbox[:, 0] == 0, 1:-2].astype(np.int)
+
+                image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
+                                                          features=features.cpu().numpy())
+
+                image = visualizations.drawBoundingBoxes(image, vis_detected_bbox[:, :-1],
+                                                        class_name=[self.object_classes[i]
+                                                                    for i in fb_detected_bbox[:, -1]],
+                                                         ground_truth=False, rescale_image=True)
+
+                self.writer.add_image('FB', image, counter, dataformats='HWC')
+
+
+                batch_one_mask = locations[:, -1] == 0
+                vis_locations = locations[batch_one_mask, :2]
+                features = features[batch_one_mask, :]
+                vis_detected_bbox = asyn_detected_bbox[asyn_detected_bbox[:, 0] == 0, 1:-2].astype(np.int)
+
+                image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
+                                                          features=features.cpu().numpy())
+
+                image = visualizations.drawBoundingBoxes(image, vis_detected_bbox[:, :-1],
+                                                        class_name=[self.object_classes[i]
+                                                                    for i in asyn_detected_bbox[:, -1]],
+                                                         ground_truth=False, rescale_image=True)
+
+                self.writer.add_image('ASYN', image, counter, dataformats='HWC')
+
+
+
+                """
+                # Change x, width and y, height
+                bounding_box[:, :, [0, 2]] = (bounding_box[:, :, [0, 2]] * self.model_input_size[1].float()
+                                              / self.settings.width).long()
+                bounding_box[:, :, [1, 3]] = (bounding_box[:, :, [1, 3]] * self.model_input_size[0].float()
+                                              / self.settings.height).long()
+
+                image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
+                                                          features=features.cpu().numpy(),
+                                                          bounding_box=bounding_box[0, :, :].cpu().numpy(),
+                                                          class_name=[self.object_classes[i]
+                                                                      for i in bounding_box[0, :, -1]])
+
+                image = visualizations.drawBoundingBoxes(image, bounding_box[0, :, :].cpu().numpy(),
+                                                         class_name=[self.object_classes[i]
+                                                                     for i in bounding_box[0, :, -1]],
+                                                         ground_truth=True, rescale_image=True)
+
+                self.writer.add_image('GT', image, counter, dataformats='HWC')
+                """
+
+                counter += 1
+
+                if counter % 5 == 0:
+                    print("saving")
+
+                    file_path = os.path.join(self.settings.ckpt_dir, 'test_results.pth')
+                    torch.save({'state_dict': fb_model.state_dict()}, file_path)
 
 
 
 def main():
     parser = argparse.ArgumentParser(description='Test network.')
     parser.add_argument('--settings_file', help='Path to settings yaml', required=True)
-    parser.add_argument('--save_dir', help='Path to save location', required=True)
+    parser.add_argument('--save_dir', help='Path to save location')
     parser.add_argument('--representation', default="")
     parser.add_argument('--use_multiprocessing', help='If multiprocessing should be used', action='store_true')
     parser.add_argument('--compute_active_sites', help='If active sites should be calculated', action='store_true')
