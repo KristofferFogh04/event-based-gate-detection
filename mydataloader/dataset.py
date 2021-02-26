@@ -52,11 +52,11 @@ def random_flip_events_along_x(events, resolution=(180, 240), p=0.5, bounding_bo
 
 
 def getDataloader(name):
-    dataset_dict = {'NCaltech101_ObjectDetection': NCaltech101_ObjectDetection,
+    dataset_dict = {'NCaltech101': NCaltech101,
+                    'NCaltech101_ObjectDetection': NCaltech101_ObjectDetection,
                     'Prophesee': Prophesee,
-                    'N_AU_DR': N_AU_DR}
+                    'NCars': NCars}
     return dataset_dict.get(name)
-
 
 
 class NCaltech101:
@@ -557,13 +557,11 @@ class Prophesee(NCaltech101):
         return np_bbox
 
 
-
-
-class N_AU_DR(NCaltech101):
+class NCars(NCaltech101):
     def __init__(self, root, object_classes, height, width, nr_events_window=-1, augmentation=False, mode='training',
                  event_representation='histogram', shuffle=True):
         """
-        Creates an iterator over the AU-DR gate detection dataset.
+        Creates an iterator over the N_Caltech101 dataset.
 
         :param root: path to dataset root
         :param object_classes: list of string containing objects or 'all' for all classes
@@ -576,75 +574,27 @@ class N_AU_DR(NCaltech101):
         """
         if mode == 'training':
             mode = 'train'
-        elif mode == 'validation':
-            mode = 'val'
         elif mode == 'testing':
             mode = 'test'
-
-        file_dir = os.path.join('detection_dataset_duration_10s', mode)
-        self.files = listdir(os.path.join(root, file_dir))
-        # Remove duplicates (.npy and .dat)
-        self.files = [os.path.join(file_dir, time_seq_name[:-9]) for time_seq_name in self.files
-                      if time_seq_name[-3:] == 'npy']
-
-        self.root = root
-        self.mode = mode
+        if mode == 'validation':
+            mode = 'val'
+        self.root = os.path.join(root, mode)
+        self.object_classes = object_classes
         self.width = width
         self.height = height
         self.augmentation = augmentation
+        self.nr_events_window = nr_events_window
+        self.nr_classes = len(self.object_classes)
         self.event_representation = event_representation
-        if nr_events_window == -1:
-            self.nr_events_window = 250000
-        else:
-            self.nr_events_window = nr_events_window
 
-        self.max_nr_bbox = 15
-
-        if object_classes == 'all':
-            self.nr_classes = 2
-            self.object_classes = ['Gate', "Pedestrian"]
-        else:
-            self.nr_classes = len(object_classes)
-            self.object_classes = object_classes
-
-        self.sequence_start = []
-        self.createAllBBoxDataset()
+        self.files = listdir(self.root)
         self.nr_samples = len(self.files)
 
         if shuffle:
-            zipped_lists = list(zip(self.files,  self.sequence_start))
-            random.seed(7)
-            random.shuffle(zipped_lists)
-            self.files,  self.sequence_start = zip(*zipped_lists)
+            random.shuffle(self.files)
 
-    def createAllBBoxDataset(self):
-        """
-        Iterates over the files and stores for each unique bounding box timestep the file name and the index of the
-         unique indices file.
-        """
-        file_name_bbox_id = []
-        print('Building the Dataset')
-        pbar = tqdm.tqdm(total=len(self.files), unit='File', unit_scale=True)
-
-        for i_file, file_name in enumerate(self.files):
-            bbox_file = os.path.join(self.root, file_name + '_bbox.npy')
-            event_file = os.path.join(self.root, file_name + '_td.dat')
-            f_bbox = open(bbox_file, "rb")
-            start, v_type, ev_size, size = npy_events_tools.parse_header(f_bbox)
-            dat_bbox = np.fromfile(f_bbox, dtype=v_type, count=-1)
-            f_bbox.close()
-
-            unique_ts, unique_indices = np.unique(dat_bbox['ts'], return_index=True)
-
-            for unique_time in unique_ts:
-                sequence_start = self.searchEventSequence(event_file, unique_time, nr_window_events=250000)
-                self.sequence_start.append(sequence_start)
-
-            file_name_bbox_id += [[file_name, i] for i in range(len(unique_indices))]
-            pbar.update(1)
-
-        pbar.close()
-        self.files = file_name_bbox_id
+    def __len__(self):
+        return len(self.files)
 
     def __getitem__(self, idx):
         """
@@ -652,107 +602,24 @@ class N_AU_DR(NCaltech101):
         :param idx:
         :return: x,y,t,p,  label
         """
-        bbox_file = os.path.join(self.root, self.files[idx][0] + '_bbox.npy')
-        event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
+        label = np.loadtxt(os.path.join(self.root, self.files[idx], 'is_car.txt')).astype(np.int64)
+        events = np.loadtxt(os.path.join(self.root, self.files[idx], 'events.txt'), dtype=np.float32)
+        events[events[:, -1] == 0, -1] = -1
+        nr_events = events.shape[0]
 
-        # Bounding Box
-        f_bbox = open(bbox_file, "rb")
-        # dat_bbox types (v_type):
-        # [('ts', 'uint64'), ('x', 'float32'), ('y', 'float32'), ('w', 'float32'), ('h', 'float32'), (
-        # 'class_id', 'uint8'), ('confidence', 'float32'), ('track_id', 'uint32')]
-        start, v_type, ev_size, size = npy_events_tools.parse_header(f_bbox)
-        dat_bbox = np.fromfile(f_bbox, dtype=v_type, count=-1)
-        f_bbox.close()
+        window_start = 0
+        window_end = nr_events
+        if self.augmentation:
+            events = random_shift_events(events, max_shift=10,resolution=(self.height, self.width))
+            events = random_flip_events_along_x(events, resolution=(self.height, self.width))
+            window_start = random.randrange(0, max(1, nr_events - self.nr_events_window))
 
-        unique_ts, unique_indices = np.unique(dat_bbox['ts'], return_index=True)
-        nr_unique_ts = unique_ts.shape[0]
+        if self.nr_events_window != -1:
+            # Catch case if number of events in batch is lower than number of events in window.
+            window_end = min(nr_events, window_start + self.nr_events_window)
 
-        bbox_time_idx = self.files[idx][1]
+        events = events[window_start:window_end, :]
 
-        # Get bounding boxes at current timestep
-        if bbox_time_idx == (nr_unique_ts - 1):
-            end_idx = dat_bbox['ts'].shape[0]
-        else:
-            end_idx = unique_indices[bbox_time_idx+1]
-
-        bboxes = dat_bbox[unique_indices[bbox_time_idx]:end_idx]
-
-        # Required Information ['x', 'y', 'w', 'h', 'class_id']
-        np_bbox = rfn.structured_to_unstructured(bboxes)[:, [1, 2, 3, 4, 5]]
-        np_bbox = self.cropToFrame(np_bbox)
-
-        const_size_bbox = np.zeros([self.max_nr_bbox, 5])
-        const_size_bbox[:np_bbox.shape[0], :] = np_bbox
-
-        # Events
-        events = self.readEventFile(event_file, self.sequence_start[idx],  nr_window_events=self.nr_events_window)
         histogram = self.generate_input_representation(events, (self.height, self.width))
 
-        return events, const_size_bbox.astype(np.int64), histogram
-
-    def searchEventSequence(self, event_file, bbox_time, nr_window_events=250000):
-        """
-        Code adapted from:
-        https://github.com/prophesee-ai/prophesee-automotive-dataset-toolbox/blob/master/src/io/psee_loader.py
-
-        go to the time final_time inside the file. This is implemented using a binary search algorithm
-        :param final_time: expected time
-        :param term_cirterion: (nb event) binary search termination criterion
-        it will load those events in a buffer and do a numpy searchsorted so the result is always exact
-        """
-        term_criterion = nr_window_events // 2
-        nr_events = dat_events_tools.count_events(event_file)
-        file_handle = open(event_file, "rb")
-        ev_start, ev_type, ev_size, img_size = dat_events_tools.parse_header(file_handle)
-        low = 0
-        high = nr_events
-
-        # binary search
-        while high - low > term_criterion:
-            middle = (low + high) // 2
-
-            # self.seek_event(file_handle, middle)
-            file_handle.seek(ev_start + middle * ev_size)
-            mid = np.fromfile(file_handle, dtype=[('ts', 'u4'), ('_', 'i4')], count=1)["ts"][0]
-
-            if mid > bbox_time:
-                high = middle
-            elif mid < bbox_time:
-                low = middle + 1
-            else:
-                file_handle.seek(ev_start + (middle - (term_criterion // 2) * ev_size))
-                break
-
-        file_handle.close()
-        # we now know that it is between low and high
-        return ev_start + low * ev_size
-
-    def readEventFile(self, event_file, file_position, nr_window_events=250000):
-        file_handle = open(event_file, "rb")
-        # file_position = ev_start + low * ev_size
-        file_handle.seek(file_position)
-        dat_event = np.fromfile(file_handle, dtype=[('ts', 'u4'), ('_', 'i4')], count=nr_window_events)
-        file_handle.close()
-
-        x = np.bitwise_and(dat_event["_"], 16383)
-        y = np.right_shift(
-            np.bitwise_and(dat_event["_"], 268419072), 14)
-        p = np.right_shift(np.bitwise_and(dat_event["_"], 268435456), 28)
-        p[p == 0] = -1
-        events_np = np.stack([x, y, dat_event['ts'], p], axis=-1)
-
-        return events_np
-
-    def cropToFrame(self, np_bbox):
-        """Checks if bounding boxes are inside frame. If not crop to border"""
-        array_width = np.ones_like(np_bbox[:, 0]) * self.width - 1
-        array_height = np.ones_like(np_bbox[:, 1]) * self.height - 1
-
-        np_bbox[:, :2] = np.maximum(np_bbox[:, :2], np.zeros_like(np_bbox[:, :2]))
-        np_bbox[:, 0] = np.minimum(np_bbox[:, 0], array_width)
-        np_bbox[:, 1] = np.minimum(np_bbox[:, 1], array_height)
-
-        np_bbox[:, 2] = np.minimum(np_bbox[:, 2], array_width - np_bbox[:, 0])
-        np_bbox[:, 3] = np.minimum(np_bbox[:, 3], array_height - np_bbox[:, 1])
-
-        return np_bbox
+        return events, label, histogram

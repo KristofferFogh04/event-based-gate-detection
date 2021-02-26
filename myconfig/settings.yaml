@@ -2,8 +2,15 @@ dataset:
   # 'NCaltech101' or 'NCaltech101_ObjectDetection', 'Prophesee', 'NCars'
   name: 'Prophesee'
   event_representation: 'histogram'  # ['histogram', 'event_queue']
+  ncaltech101:
+    dataset_path: "/media/kristoffer/ELEMENTS/NCaltech101"
+    # Single classes e.g. ['anchor', 'helicopter', 'Motorbikes'] or 'all' for all classes
+    object_classes: 'all'
+    height: 180
+    width: 240
+    nr_events_window: 50000
   ncaltech101_objectdetection:
-    dataset_path: "data/NCaltech101"
+    dataset_path: "/media/kristoffer/ELEMENTS/NCaltech_object_det"
     object_classes: 'all'
     height: 180
     width: 240
@@ -28,7 +35,7 @@ model:
   # ['fb_sparse_vgg', 'dense_vgg', 'fb_sparse_object_det', 'dense_object_det', 'sparse_gatenet']
   model_name: 'fb_sparse_object_det'
 optim:
-  batch_size: 30
+  batch_size: 15
   init_lr: 1e-4
   # Set to "steps: ~" if no scheduler is needed
   steps_lr: [500, 1000, 1500]

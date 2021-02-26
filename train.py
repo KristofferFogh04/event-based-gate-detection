@@ -6,6 +6,7 @@ import argparse
 from myconfig.settings import Settings
 from mytraining.trainer import SparseObjectDetModel
 from mytraining.trainer import DenseObjectDetModel
+from mytraining.trainer import FBSparseVGGModel
 
 
 def main():
