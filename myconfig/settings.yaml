@@ -9,7 +9,8 @@ dataset:
     width: 240
     nr_events_window: 25000
   prophesee:
-    dataset_path: "data/PropheseeG1"
+    dataset_path: "/media/kristoffer/ELEMENTS/PropheseeG1"
+    #dataset_path: "data/PropheseeG1"
     object_classes: 'all'
     height: 240
     width: 304
@@ -37,10 +38,10 @@ checkpoint:
   resume_file: ''
   # Networks trained for classification can be reused as starting point for object detection networks on trained
   # the same dataset
-  use_pretrained: True
+  use_pretrained: False
   pretrained_dense_vgg: ''
   pretrained_sparse_vgg: 'log/trained-NCaltech/checkpoints/model_step_25.pth'
 hardware:
   # num_cpu_workers: {-1: auto, 0: main thread, >0: ...}
   num_cpu_workers: -1
-  gpu_device: 'cpu'  # [0 or 'cpu']
+  gpu_device: 0  # [0 or 'cpu']
