@@ -39,7 +39,11 @@ class TestSparseVGG():
         self.model_input_size = torch.tensor([self.settings.height, self.settings.width])
         self.nr_events_timestep = [self.settings.nr_events_window, self.settings.nr_events_window]
 
+<<<<<<< HEAD
         self.writer = SummaryWriter(self.save_dir)
+=======
+        self.writer = SummaryWriter(self.settings.ckpt_dir)
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
 
     def test_sparse_VGG(self):
         """Tests if output of sparse VGG is equivalent to the facebook implementation"""
@@ -79,6 +83,7 @@ class TestSparseVGG():
             dataloader = getDataloader(self.settings.dataset_name)
             test_dataset = dataloader(self.settings.dataset_path, 'all', self.settings.height,
                                             self.settings.width, augmentation=False, mode='validation',
+<<<<<<< HEAD
                                             nr_events_window=event_window, shuffle=False)
             self.object_classes = test_dataset.object_classes
 
@@ -86,6 +91,13 @@ class TestSparseVGG():
             trackid = 0
             out_dtype = np.dtype([('ts', '<u8'),('x', '<f4'), ('y', '<f4'), ('w', '<f4'), ('h', '<f4'), ('class_id', 'u1'), ('confidence', '<f4'), ('track_id', '<u4')])
             detected_bounding_boxes = np.empty((0,), dtype = out_dtype)
+=======
+                                            nr_events_window=event_window, shuffle=True)
+            self.object_classes = test_dataset.object_classes
+
+            counter = 1
+
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
 
             for i_batch, sample_batched in enumerate(test_dataset):
 
@@ -115,6 +127,7 @@ class TestSparseVGG():
                 fb_detected_bbox = nonMaxSuppression(fb_detected_bbox, iou=0.6)
                 fb_detected_bbox = fb_detected_bbox.long().cpu().numpy()
 
+<<<<<<< HEAD
 
                 fb_detected_bbox_out = fb_detected_bbox.copy()
                 fb_detected_bbox_out[:,0] = events[0,2]
@@ -132,6 +145,12 @@ class TestSparseVGG():
                 print(fb_detected_bbox)
 
                 """
+=======
+                print("fb: ")
+                print(fb_detected_bbox)
+
+
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
                 with torch.no_grad():
                     for i_sequence, nr_events in enumerate(self.nr_events_timestep):
 
@@ -153,7 +172,15 @@ class TestSparseVGG():
                         asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
                         asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
 
+<<<<<<< HEAD
                 """
+=======
+                #print("FB: ")
+                #print(fb_detected_bbox)
+                #print("ASYN:")
+                #print(asyn_detected_bbox)
+
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
                 batch_one_mask = locations[:, -1] == 0
                 vis_locations = locations[batch_one_mask, :2]
                 features = features[batch_one_mask, :]
@@ -169,7 +196,11 @@ class TestSparseVGG():
 
                 self.writer.add_image('FB', image, counter, dataformats='HWC')
 
+<<<<<<< HEAD
                 """
+=======
+
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
                 batch_one_mask = locations[:, -1] == 0
                 vis_locations = locations[batch_one_mask, :2]
                 features = features[batch_one_mask, :]
@@ -184,7 +215,11 @@ class TestSparseVGG():
                                                          ground_truth=False, rescale_image=True)
 
                 self.writer.add_image('ASYN', image, counter, dataformats='HWC')
+<<<<<<< HEAD
                 """
+=======
+
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
 
 
                 """
@@ -213,10 +248,15 @@ class TestSparseVGG():
                 if counter % 5 == 0:
                     print("saving")
 
+<<<<<<< HEAD
                     file_path = os.path.join(self.save_dir, 'test_results.pth')
                     torch.save({'state_dict': fb_model.state_dict()}, file_path)
             file_path = os.path.join(self.save_dir, 'result_bounding_boxes.npy')
             np.save(file_path, detected_bounding_boxes)
+=======
+                    file_path = os.path.join(self.settings.ckpt_dir, 'test_results.pth')
+                    torch.save({'state_dict': fb_model.state_dict()}, file_path)
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
 
 
 
@@ -234,7 +274,11 @@ def main():
 
     settings = Settings(settings_filepath, generate_log=False)
 
+<<<<<<< HEAD
     tester = TestSparseVGG(args, settings, save_dir)
+=======
+    tester = TestSparseVGG(args, settings)
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
     tester.test_sparse_VGG()
 
 

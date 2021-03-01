@@ -12,10 +12,13 @@ eigen/
 data/
 log/
 
+<<<<<<< HEAD
 # data and numpy files
 *.npy
 *.dat
 
+=======
+>>>>>>> 19b960af6250596348abd201e7d77bab9ed7d46e
 # C extensions
 *.so
 
