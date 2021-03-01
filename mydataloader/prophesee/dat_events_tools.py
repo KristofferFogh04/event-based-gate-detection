@@ -1,18 +1,19 @@
 """
-Code was copied from: https://github.com/prophesee-ai/prophesee-automotive-dataset-toolbox/blob/master/src/io/dat_events_tools.py
 Defines some tools to handle events.
 In particular :
     -> defines events' types
     -> defines functions to read events from binary .dat files using numpy
     -> defines functions to write events to binary .dat files using numpy
+
 Copyright: (c) 2019-2020 Prophesee
 """
 from __future__ import print_function
 import os
 import sys
+import datetime
 import numpy as np
 
-EV_TYPE = [('ts', 'u4'), ('_', 'i4')]  # Event2D
+EV_TYPE = [('t', 'u4'), ('_', 'i4')]  # Event2D
 
 EV_STRING = 'Event2D'
 
@@ -25,9 +26,11 @@ def load_td_data(filename, ev_count=-1, ev_start=0):
         - path to a dat file
         - number of event (all if set to the default -1)
         - index of the first event
+
     return :
         - dat, a dictionary like structure containing the fields ts, x, y, p
     """
+
     with open(filename, 'rb') as f:
         _, ev_type, ev_size, _ = parse_header(f)
         if ev_start > 0:
@@ -42,7 +45,6 @@ def load_td_data(filename, ev_count=-1, ev_start=0):
                 np.bitwise_and(dat["_"], 268419072), 14)
             p = np.right_shift(np.bitwise_and(dat["_"], 268435456), 28)
             xyp = (x, y, p)
-
         return _dat_transfer(dat, dtype, xyp=xyp)
 
 
@@ -72,10 +74,30 @@ def _dat_transfer(dat, dtype, xyp=None):
         new_dat["x"] = xyp[0].astype(np.uint16)
         new_dat["y"] = xyp[1].astype(np.uint16)
         new_dat["p"] = xyp[2].astype(np.uint16)
-
     for (name, arr) in variables:
         new_dat[name] = arr
     return new_dat
+
+
+def stream_td_data(file_handle, buffer, dtype, ev_count=-1):
+    """
+    Streams data from opened file_handle
+    args :
+        - file_handle: file object
+        - buffer: pre-allocated buffer to fill with events
+        - dtype:  expected fields
+        - ev_count: number of events
+    """
+
+    dat = np.fromfile(file_handle, dtype=dtype, count=ev_count)
+    count = len(dat['t'])
+    for name, _ in dtype:
+        if name == '_':
+            buffer['x'][:count] = np.bitwise_and(dat["_"], 16383)
+            buffer['y'][:count] = np.right_shift(np.bitwise_and(dat["_"], 268419072), 14)
+            buffer['p'][:count] = np.right_shift(np.bitwise_and(dat["_"], 268435456), 28)
+        else:
+            buffer[name][:count] = dat[name]
 
 
 def count_events(filename):
@@ -149,3 +171,55 @@ def parse_header(f):
 
     bod = f.tell()
     return bod, ev_type, ev_size, size
+
+
+def write_header(filename, height=240, width=320, ev_type=0):
+    """
+    write header for a dat file
+    """
+    if max(height, width) > 2**14 - 1:
+        raise ValueError('Coordinates value exceed maximum range in'
+                         ' binary .dat file format max({:d},{:d}) vs 2^14 - 1'.format(
+                             height, width))
+    f = open(filename, 'w')
+    f.write('% Data file containing {:s} events.\n'
+            '% Version 2\n'.format(EV_STRING[ev_type]))
+    now = datetime.datetime.utcnow()
+    f.write("% Date {}-{}-{} {}:{}:{}\n".format(now.year,
+                                                now.month, now.day, now.hour,
+                                                now.minute, now.second))
+
+    f.write('% Height {:d}\n'
+            '% Width {:d}\n'.format(height, width))
+    # write type and bit size
+    ev_size = sum([int(b[-1]) for _, b in EV_TYPE])
+
+    np.array([ev_type, ev_size], dtype=np.uint8).tofile(f)
+    f.flush()
+    return f
+
+
+def write_event_buffer(f, buffers):
+    """
+    writes events of fields x,y,p,t into the file object f
+    """
+    # pack data as events
+    dtype = EV_TYPE
+    data_to_write = np.empty(len(buffers['timestamp']), dtype=dtype)
+
+    for (name, typ) in buffers.dtype.fields.items():
+        if name == 'x':
+            x = buffers['y'].astype('i4')
+        elif name == 'y':
+            y = np.left_shift(buffers['x'].astype('i4'), 14)
+        elif name == 'polarity':
+            buffers['polarity'] = (buffers['polarity'] == 1).astype(buffers['polarity'].dtype)
+            p = np.left_shift(buffers['polarity'].astype("i4"), 28)
+        else:
+            data_to_write['t'] = buffers[name].astype(typ[0])
+
+    data_to_write['_'] = x + y + p
+
+    # write data
+    data_to_write.tofile(f)
+    f.flush()

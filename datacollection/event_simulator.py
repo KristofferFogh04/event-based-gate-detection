@@ -7,7 +7,7 @@ EVENT_TYPE = np.dtype(
     [("timestamp", "f8"), ("x", "u2"), ("y", "u2"), ("polarity", "b")], align=True
 )
 
-TOL = 2
+TOL = 0.9
 MINIMUM_CONTRAST_THRESHOLD = 0.01
 
 CONFIG = SimpleNamespace(

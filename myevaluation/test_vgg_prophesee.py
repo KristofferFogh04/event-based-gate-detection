@@ -20,8 +20,7 @@ from mytraining.trainer import AbstractTrainer
 import rpg_asynet.utils.visualizations as visualizations
 import utils.test_util as test_util
 
-# DEVICE = torch.device("cuda:0")
-device = torch.device("cpu")
+device = torch.device("cuda:0")
 
 class TestSparseVGG():
 
@@ -213,10 +212,11 @@ class TestSparseVGG():
 
                 if counter % 5 == 0:
                     print("saving")
-
                     file_path = os.path.join(self.save_dir, 'test_results.pth')
                     torch.save({'state_dict': fb_model.state_dict()}, file_path)
+            print("Saving bounding boxes")
             file_path = os.path.join(self.save_dir, 'result_bounding_boxes.npy')
+            print(file_path)
             np.save(file_path, detected_bounding_boxes)
 
 
@@ -224,8 +224,8 @@ class TestSparseVGG():
 def main():
     parser = argparse.ArgumentParser(description='Test network.')
     parser.add_argument('--settings_file', help='Path to settings yaml', required=True)
-    parser.add_argument('--save_dir', help='Path to save location')
-    parser.add_argument('--representation', default="")
+    parser.add_argument('--save_dir', help='Path to save location', default="log/PropheseeResults")
+    parser.add_argument('--representation')
     parser.add_argument('--use_multiprocessing', help='If multiprocessing should be used', action='store_true')
     parser.add_argument('--compute_active_sites', help='If active sites should be calculated', action='store_true')
 
