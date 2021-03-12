@@ -18,8 +18,8 @@ from mydataloader.prophesee import dat_events_tools
 parser = argparse.ArgumentParser(description="Simulate event data from AirSim")
 parser.add_argument("--debug", action="store_true")
 parser.add_argument("--save", action="store_true")
-parser.add_argument("--height", type=int, default=240)
-parser.add_argument("--width", type=int, default=304)
+parser.add_argument("--height", type=int, default=180)
+parser.add_argument("--width", type=int, default=240)
 
 
 class AirSimEventGen:

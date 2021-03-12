@@ -24,8 +24,8 @@
     "CaptureSettings": [
       {
         "ImageType": 0,
-        "Width": 304,
-        "Height": 240,
+        "Width": 240,
+        "Height": 180,
         "FOV_Degrees": 90,
         "AutoExposureSpeed": 100,
         "AutoExposureBias": 0,

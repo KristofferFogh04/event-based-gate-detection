@@ -17,8 +17,8 @@ from mydataloader.prophesee import dat_events_tools
 
 parser = argparse.ArgumentParser(description="Simulate event data from AirSim")
 parser.add_argument("--debug", action="store_true")
-parser.add_argument("--height", type=int, default=240)
-parser.add_argument("--width", type=int, default=304)
+parser.add_argument("--height", type=int, default=180)
+parser.add_argument("--width", type=int, default=240)
 
 
 class AirSimEventGen:
@@ -116,22 +116,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     event_generator = AirSimEventGen(args.width, args.height, debug=args.debug)
-    number_of_trials = 3
+    number_of_trials = 10
 
     signal.signal(signal.SIGINT, event_generator._stop_event_gen)
 
     for i in range(number_of_trials):
         t_start = time.time()
         print("here we go")
-        while (time.time() - t_start) < 10:
+        while (time.time() - t_start) < 60:
             image_request = airsim.ImageRequest("0", airsim.ImageType.Scene, False, False)
-            tnew = time.time_ns()
+            #tnew = time.time_ns()
             response = event_generator.client.simGetImages([event_generator.image_request])
             while response[0].height == 0 or response[0].width == 0:
                 response = event_generator.client.simGetImages(
                     [event_generator.image_request]
                 )
-            print("time grab: " + str((time.time_ns() - tnew)/1000000))
+            #print("time grab: " + str((time.time_ns() - tnew)/1000000))
             ts = time.time_ns()
 
             if event_generator.init:
@@ -153,15 +153,14 @@ if __name__ == "__main__":
             # Event sim keeps track of previous image automatically
             event_img, events = event_generator.ev_sim.image_callback(img, ts_delta)
 
-            tnew = time.time_ns()
+            #tnew = time.time_ns()
             if events is not None and events.shape[0] > 0:
                 events['timestamp'] = (events['timestamp']*1000000).astype(int)
-                print(events)
                 dat_events_tools.write_event_buffer(event_generator.event_file, events)
                 event_generator.collectData(events[0][0])
                 if event_generator.debug:
                     event_generator.visualize_events(event_img)
-            print("time vis: " + str((time.time_ns() - tnew)/1000000))
+            #print("time vis: " + str((time.time_ns() - tnew)/1000000))
 
         event_generator.save_to_files()
         event_generator.event_file.close()
