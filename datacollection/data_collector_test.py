@@ -1,3 +1,7 @@
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir) 
 import numpy as np
 import airsim
 from datetime import datetime
@@ -9,6 +13,7 @@ import sys, signal
 import pandas as pd
 import pickle
 from event_simulator import *
+from mydataloader.prophesee import dat_events_tools
 
 parser = argparse.ArgumentParser(description="Simulate event data from AirSim")
 parser.add_argument("--debug", action="store_true")
@@ -18,7 +23,7 @@ parser.add_argument("--width", type=int, default=304)
 
 class AirSimEventGen:
     def __init__(self, W, H, debug=False):
-        self.ev_sim = EventSimulator(W, H)
+        self.ev_sim = EventSimulator(H, W)
         self.W = W
         self.H = H
 
@@ -34,8 +39,9 @@ class AirSimEventGen:
         self.rgb_image_shape = [H, W, 3]
         self.debug = debug
 
-        self.event_fmt = "%1.7f", "%d", "%d", "%d"
-        self.events = None
+        # Setup .dat event file
+        self.tstart = str(int(time.time()))
+        self.event_file = self.setup_event_file()
 
         if debug:
             self.fig, self.ax = plt.subplots(1, 1)
@@ -45,6 +51,12 @@ class AirSimEventGen:
         self.attrFrequency = 2 # Hz
         self.singleDroneAttribute = np.zeros(14)
         self.droneAttributes = np.zeros([14])
+
+    def setup_event_file(self):
+        date = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+        self.event_filename = date + '_' + self.tstart + '_td.dat'
+        event_file = dat_events_tools.write_header(self.event_filename, self.H, self.W)
+        return event_file
 
 
     def visualize_events(self, event_img):
@@ -62,11 +74,9 @@ class AirSimEventGen:
 
         return out
 
-    def save_to_files(self, tstart, tend):
+    def save_to_files(self):
         date = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-        np.save('events_' + date + '_' + str(int(tstart)) + '_' + str(int(tend)) + '.npy', self.events[1:])
-        np.save('attributes_' + date + '_' + str(int(tstart)) + '_' + str(int(tend)) + '.npy', self.droneAttributes[:,1:])
-        self.events = None
+        np.save(date + '_' + self.tstart + '_attr.npy', self.droneAttributes[:,1:])
         self.droneAttributes = np.zeros([14])
 
 
@@ -145,12 +155,18 @@ if __name__ == "__main__":
 
             tnew = time.time_ns()
             if events is not None and events.shape[0] > 0:
-                event_generator.events = np.r_[event_generator.events, events]
+                events['timestamp'] = (events['timestamp']*1000000).astype(int)
+                print(events)
+                dat_events_tools.write_event_buffer(event_generator.event_file, events)
                 event_generator.collectData(events[0][0])
                 if event_generator.debug:
                     event_generator.visualize_events(event_img)
             print("time vis: " + str((time.time_ns() - tnew)/1000000))
 
-        event_generator.save_to_files(t_start, time.time())
+        event_generator.save_to_files()
+        event_generator.event_file.close()
+        event_generator.tstart = str(int(time.time()))
+        if i != number_of_trials-1:
+            event_generator.event_file = event_generator.setup_event_file()
 
 

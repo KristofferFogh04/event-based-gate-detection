@@ -1,24 +1,30 @@
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir) 
 import numpy as np
 import airsim
 import time
 import cv2
 import matplotlib.pyplot as plt
 import argparse
+from datetime import datetime
 import sys, signal
 import pandas as pd
 import pickle
-import rospy
 from event_simulator import *
+from mydataloader.prophesee import dat_events_tools
 
 parser = argparse.ArgumentParser(description="Simulate event data from AirSim")
 parser.add_argument("--debug", action="store_true")
+parser.add_argument("--save", action="store_true")
 parser.add_argument("--height", type=int, default=240)
 parser.add_argument("--width", type=int, default=304)
 
 
 class AirSimEventGen:
     def __init__(self, W, H, save=False, debug=False):
-        self.ev_sim = EventSimulator(W, H)
+        self.ev_sim = EventSimulator(H, W)
         self.W = W
         self.H = H
 
@@ -34,20 +40,14 @@ class AirSimEventGen:
         self.rgb_image_shape = [H, W, 3]
         self.debug = debug
         self.save = save
-
-        self.event_file = "events.npy"
-        self.event_fmt = "%1.7f", "%d", "%d", "%d"
+        if save:
+            date = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+            self.event_filename = date + '_' + str(int(time.time())) + '_td.dat'
+            self.event_file = dat_events_tools.write_header(self.event_filename, self.H, self.W)
 
         if debug:
             self.fig, self.ax = plt.subplots(1, 1)
-
-        ## Attribute collection
-        self.counter = 0
-        self.attrFrequency = 2 # Hz
-        self.attrFilename = 'event_attributes.npy'
-        self.singleDroneAttribute = np.zeros(13)
-        self.droneAttributes = np.zeros(1,13)
-
+            
 
     def visualize_events(self, event_img):
         event_img = self.convert_event_img_rgb(event_img)
@@ -69,24 +69,6 @@ class AirSimEventGen:
         self.event_file.close()
         sys.exit(0)
 
-    ## Attribute collection
-    # Attributes are collected in a .npy file with the following formatting:
-    # [ts, pos_x, pos_y, pos_z, att_x, att_y, att_z, 
-    # linvel_x, linvel_y, linvel_z, angvel_x, angvel_y, angvel_z]
-    # We might assume that the gates are static and does not change position and pose
-    def collectData(self, ts):
-        self.singleDroneAttribute[0] = ts
-        self.singleDroneAttribute[1:6] = airsim.simGetVehiclePose('PX4')
-        self.singleDroneAttribute[7:12] = airsim.getImuData('Imu', 'PX4')
-        obj = airsim.simGetObjectPose('OrangeBall')
-
-        self.droneAttributes[counter, :] = self.singleDroneAttribute
-        counter += 1
-        
-
-    def saveAttrToNpy(self):
-        np.save(self.attrFilename, self.droneAttributes)
-
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -99,14 +81,18 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, event_generator._stop_event_gen)
 
     while True:
+        #t1 = time.time_ns()
         image_request = airsim.ImageRequest("0", airsim.ImageType.Scene, False, False)
-        tnew = time.time_ns()
+
         response = event_generator.client.simGetImages([event_generator.image_request])
         while response[0].height == 0 or response[0].width == 0:
             response = event_generator.client.simGetImages(
                 [event_generator.image_request]
             )
-        print("time grab: " + str((time.time_ns() - tnew)/1000000))
+        #deltat = time.time_ns() - t1
+        #print("t1: ", deltat/1000000)
+
+        #t2 = time.time_ns()
         ts = time.time_ns()
 
         if event_generator.init:
@@ -118,6 +104,11 @@ if __name__ == "__main__":
             event_generator.rgb_image_shape,
         )
 
+        #deltat = time.time_ns() - t2
+        #print("t2: ", deltat/1000000)
+
+        #t3 = time.time_ns()
+
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
         # Add small number to avoid issues with log(I)
         img = cv2.add(img, 0.001)
@@ -125,15 +116,31 @@ if __name__ == "__main__":
         ts = time.time_ns()
         ts_delta = (ts - event_generator.start_ts) * 1e-3
 
+        #deltat = time.time_ns() - t3
+        #print("t3: ", deltat/1000000)
+
+        #t4 = time.time_ns()
         # Event sim keeps track of previous image automatically
         event_img, events = event_generator.ev_sim.image_callback(img, ts_delta)
-        tnew = time.time_ns()
+
+        #event_dict = {'t': events[0]}
+
+        #deltat = time.time_ns() - t4
+        #print("t4: ", deltat/1000000)
+
+        #t5 = time.time_ns()
         if events is not None and events.shape[0] > 0:
+
+            events['timestamp'] = (events['timestamp']*1000000).astype(int)
+
             if event_generator.save:
-                # Using pickle dump in a per-frame fashion to save time, instead of savetxt
-                # Optimizations possible
-                pickle.dump(events, event_generator.event_file)
+
+                dat_events_tools.write_event_buffer(event_generator.event_file, events)
 
             if event_generator.debug:
                 event_generator.visualize_events(event_img)
-        print("time vis: " + str((time.time_ns() - tnew)/1000000))
+
+        #deltat = time.time_ns() - t5
+        #print("t5: ", deltat/1000000)
+        #delta_t = time.time_ns() - t1
+        #print("total time: ", delta_t/1000000)
