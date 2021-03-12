@@ -2,9 +2,10 @@ import torch
 import numpy as np
 from PIL import Image
 import torch.nn.functional as F
+from time import perf_counter
 
-from dataloader.dataset import NCaltech101
-from training.trainer import AbstractTrainer
+from mydataloader.dataset import NCaltech101
+from mytraining.trainer import AbstractTrainer
 from layers.site_enum import Sites
 from layers.conv_layer_2D import asynSparseConvolution2D
 from layers.max_pool import asynMaxPool
@@ -168,7 +169,8 @@ class EvalAsynSparseVGGModel(asynSparseVGG):
     def forward(self, x_asyn, active_sum=None, nr_sites=None, active_sites_vis=None, flop_calculation=False):
         """Apply asynchronous layers"""
         for j, layer in enumerate(self.asyn_layers):
-            # print('Layer Name: %s' % self.layer_list[j][0])
+            #print('Layer Name: %s' % self.layer_list[j][0])
+            t1 = perf_counter()
             self.storeStatistics(active_sum, nr_sites, active_sites_vis, x_asyn, j)
 
             if self.layer_list[j][0] == 'C':
@@ -212,8 +214,11 @@ class EvalAsynSparseVGGModel(asynSparseVGG):
                     fc_output = layer(x_asyn[1].permute(2, 0, 1).flatten().unsqueeze(0))
                 else:
                     fc_output = layer(x_asyn[1].unsqueeze(0))
+                if j == (len(self.layer_list) - 2):
+                    fc_output = torch.relu(fc_output)
                 x_asyn = [None] * 5
                 x_asyn[1] = fc_output.squeeze(0)
+            print('Layer Name: %s     Time: %.3f' % (self.layer_list[j][0].ljust(15), (perf_counter() - t1) * 1000))
 
         return x_asyn
 

@@ -1,4 +1,4 @@
-import os
+import os, sys
 import tqdm
 import random
 import numpy as np
@@ -384,7 +384,7 @@ class Prophesee(NCaltech101):
         self.files = listdir(os.path.join(root, file_dir))
         # Remove duplicates (.npy and .dat)
         self.files = [os.path.join(file_dir, time_seq_name[:-9]) for time_seq_name in self.files
-                      if time_seq_name[-3:] == 'npy']
+                  if time_seq_name[-3:] == 'npy']
 
         self.root = root
         self.mode = mode
@@ -407,7 +407,10 @@ class Prophesee(NCaltech101):
             self.object_classes = object_classes
 
         self.sequence_start = []
-        self.createAllBBoxDataset()
+        if self.mode == 'train' or self.mode == 'val':
+            self.createAllBBoxDataset()
+        else:
+            self.createDataset()
         self.nr_samples = len(self.files)
 
         if shuffle:
@@ -444,6 +447,31 @@ class Prophesee(NCaltech101):
 
         pbar.close()
         self.files = file_name_bbox_id
+        
+    def createDataset(self):
+        """
+        Iterates over the files and stores for each unique bounding box timestep the file name and the index of the
+         unique indices file.
+        """
+        file_name_seq_id = []
+        print('Building the Dataset')
+        pbar = tqdm.tqdm(total=len(self.files), unit='File', unit_scale=True)
+
+        for i_file, file_name in enumerate(self.files):
+            event_file = os.path.join(self.root, file_name + '_td.dat')
+            with open(event_file, "rb") as f:
+                start, v_type, ev_size, size = dat_events_tools.parse_header(f)
+            
+            num_events = dat_events_tools.count_events(event_file)
+            sequence_list = []
+            for i in range(num_events// self.nr_events_window):
+                self.sequence_start.append(i*self.nr_events_window*ev_size)
+                
+            file_name_seq_id += [[file_name, i] for i in range(len(self.sequence_start))]
+            pbar.update(1)
+
+        pbar.close()
+        self.files = file_name_seq_id
 
     def __getitem__(self, idx):
         """
@@ -451,43 +479,49 @@ class Prophesee(NCaltech101):
         :param idx:
         :return: x,y,t,p,  label
         """
-        bbox_file = os.path.join(self.root, self.files[idx][0] + '_bbox.npy')
-        event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
 
         # Bounding Box
-        f_bbox = open(bbox_file, "rb")
-        # dat_bbox types (v_type):
-        # [('ts', 'uint64'), ('x', 'float32'), ('y', 'float32'), ('w', 'float32'), ('h', 'float32'), (
-        # 'class_id', 'uint8'), ('confidence', 'float32'), ('track_id', 'uint32')]
-        start, v_type, ev_size, size = npy_events_tools.parse_header(f_bbox)
-        dat_bbox = np.fromfile(f_bbox, dtype=v_type, count=-1)
-        f_bbox.close()
+        if self.mode == 'train' or self.mode == 'val':
+            event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
+            bbox_file = os.path.join(self.root, self.files[idx][0] + '_bbox.npy')
+            f_bbox = open(bbox_file, "rb")
+            # dat_bbox types (v_type):
+            # [('ts', 'uint64'), ('x', 'float32'), ('y', 'float32'), ('w', 'float32'), ('h', 'float32'), (
+            # 'class_id', 'uint8'), ('confidence', 'float32'), ('track_id', 'uint32')]
+            start, v_type, ev_size, size = npy_events_tools.parse_header(f_bbox)
+            dat_bbox = np.fromfile(f_bbox, dtype=v_type, count=-1)
+            f_bbox.close()
+    
+            unique_ts, unique_indices = np.unique(dat_bbox['ts'], return_index=True)
+            nr_unique_ts = unique_ts.shape[0]
+    
+            bbox_time_idx = self.files[idx][1]
+    
+            # Get bounding boxes at current timestep
+            if bbox_time_idx == (nr_unique_ts - 1):
+                end_idx = dat_bbox['ts'].shape[0]
+            else:
+                end_idx = unique_indices[bbox_time_idx+1]
+    
+            bboxes = dat_bbox[unique_indices[bbox_time_idx]:end_idx]
+    
+            # Required Information ['x', 'y', 'w', 'h', 'class_id']
+            np_bbox = rfn.structured_to_unstructured(bboxes)[:, [1, 2, 3, 4, 5]]
+            np_bbox = self.cropToFrame(np_bbox)
+    
+            const_size_bbox = np.zeros([self.max_nr_bbox, 5])
+            const_size_bbox[:np_bbox.shape[0], :] = np_bbox
 
-        unique_ts, unique_indices = np.unique(dat_bbox['ts'], return_index=True)
-        nr_unique_ts = unique_ts.shape[0]
-
-        bbox_time_idx = self.files[idx][1]
-
-        # Get bounding boxes at current timestep
-        if bbox_time_idx == (nr_unique_ts - 1):
-            end_idx = dat_bbox['ts'].shape[0]
+            # Events
+            events = self.readEventFile(event_file, self.sequence_start[idx],  nr_window_events=self.nr_events_window)
+            histogram = self.generate_input_representation(events, (self.height, self.width))
+            return events, const_size_bbox.astype(np.int64), histogram
+            
         else:
-            end_idx = unique_indices[bbox_time_idx+1]
-
-        bboxes = dat_bbox[unique_indices[bbox_time_idx]:end_idx]
-
-        # Required Information ['x', 'y', 'w', 'h', 'class_id']
-        np_bbox = rfn.structured_to_unstructured(bboxes)[:, [1, 2, 3, 4, 5]]
-        np_bbox = self.cropToFrame(np_bbox)
-
-        const_size_bbox = np.zeros([self.max_nr_bbox, 5])
-        const_size_bbox[:np_bbox.shape[0], :] = np_bbox
-
-        # Events
-        events = self.readEventFile(event_file, self.sequence_start[idx],  nr_window_events=self.nr_events_window)
-        histogram = self.generate_input_representation(events, (self.height, self.width))
-
-        return events, const_size_bbox.astype(np.int64), histogram
+            event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
+            events = self.readEventFile(event_file, self.sequence_start[idx]+104,  nr_window_events=self.nr_events_window)
+            histogram = self.generate_input_representation(events, (self.height, self.width))
+            return events, histogram
 
     def searchEventSequence(self, event_file, bbox_time, nr_window_events=250000):
         """
@@ -555,6 +589,7 @@ class Prophesee(NCaltech101):
         np_bbox[:, 3] = np.minimum(np_bbox[:, 3], array_height - np_bbox[:, 1])
 
         return np_bbox
+    
 
 
 class NCars(NCaltech101):
