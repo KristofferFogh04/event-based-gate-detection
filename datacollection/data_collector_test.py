@@ -78,6 +78,8 @@ class AirSimEventGen:
         date = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
         np.save(date + '_' + self.tstart + '_attr.npy', self.droneAttributes[:,1:])
         self.droneAttributes = np.zeros([14])
+        del self.ev_sim
+        self.ev_sim = EventSimulator(self.H, self.W)
 
 
     def _stop_event_gen(self, signal, frame):

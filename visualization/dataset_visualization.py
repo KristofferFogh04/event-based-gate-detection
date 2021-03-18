@@ -51,12 +51,9 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
 
         # load events and boxes from all files
         events = [video.load_delta_t(delta_t) for video in videos]
-        print(len(events[0]))
         box_events = [box_video.load_delta_t(delta_t) for box_video in box_videos1]
         for index, (evs, boxes) in enumerate(zip(events, box_events)):
             y, x = divmod(index, size_x)
-            print(evs)
-            key = input('stop')
 
             if len(evs) != 0:
                 ts = evs[0][0]
