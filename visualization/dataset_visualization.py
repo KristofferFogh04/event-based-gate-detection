@@ -28,7 +28,12 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
     #box_videos2 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_result.npy')[0]) for td_file in td_files]
     
     height, width = videos[0].get_size()
-    labelmap = vis.LABELMAP if height == 240 else vis.LABELMAP_LARGE
+    if height == 180:
+        labelmap = vis.GATE_LABELMAP
+    elif height == 240:
+        labelmap = vis.LABELMAP 
+    else:
+        labelmap = vis.LABELMAP_LARGE
 
     # optionally skip n minutes in all videos
     for v in videos + box_videos1:
