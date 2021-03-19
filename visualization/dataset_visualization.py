@@ -167,7 +167,7 @@ def parse_args():
     parser.add_argument('records', nargs="+",
                         help='input event files, annotation files are expected to be in the same folder')
     parser.add_argument('-s', '--skip', default=0, type=int, help="skip the first n microseconds")
-    parser.add_argument('-d', '--delta_t', default=15000, type=int, help="load files by delta_t in microseconds")
+    parser.add_argument('-d', '--delta_t', default=4000, type=int, help="load files by delta_t in microseconds")
     parser.add_argument('-b', '--box', default=1, type=int, help="Whether to include bounding box file")
 
     return parser.parse_args()
