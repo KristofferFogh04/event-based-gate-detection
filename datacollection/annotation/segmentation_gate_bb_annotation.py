@@ -95,7 +95,6 @@ class GateBoundingBoxAnnotation:
 
                     track_id += 1
                         
-            print(file)
             split_name = file.split('_')
             save_file = split_name[0] + '_' + split_name[1] + '_' + split_name[2] + '_bbox.npy'    
             np.save(os.path.join(dest_folder, save_file), output)

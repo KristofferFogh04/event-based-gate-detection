@@ -2,7 +2,7 @@
     "SeeDocsAt": "https://github.com/Microsoft/AirSim/blob/master/docs/settings.md",
     "SettingsVersion": 1.2,
     "SimMode": "Multirotor",
-    "ViewMode": "NoDisplay",
+    "ViewMode": "Fpv",
     "ClockSpeed": 1.0,
     "Vehicles": {
         "PX4": {
@@ -24,6 +24,20 @@
     "CaptureSettings": [
       {
         "ImageType": 0,
+        "Width": 240,
+        "Height": 180,
+        "FOV_Degrees": 90,
+        "AutoExposureSpeed": 100,
+        "AutoExposureBias": 0,
+        "AutoExposureMaxBrightness": 0.64,
+        "AutoExposureMinBrightness": 0.03,
+        "MotionBlurAmount": 0,
+        "TargetGamma": 1.0,
+        "ProjectionMode": "",
+        "OrthoWidth": 5.12
+      }, 
+      {
+        "ImageType": 5,
         "Width": 240,
         "Height": 180,
         "FOV_Degrees": 90,
