@@ -27,35 +27,100 @@ class GateBoundingBoxAnnotation:
     def __init__(self):
 
         self.resolution = [240, 180]
-        self.trackid_counter = 0
+        self.trackid = 0
 
     def computeBoundingBox(self, seg_image):
 
-        start_x, start_y = -1, -1
-        end_x, end_y = -1, -1
+        debug_img = None  
+        num = 0
 
-        for y in range(self.resolution[1]):
-            if np.sum(seg_image[y, :]) > 0.0:
-                end_y = y
+        seg_image = seg_image-130
+        
+        seg_image = seg_image.astype(np.uint8)
 
-                if start_y == -1:
-                    start_y = y
+        element = cv2.getStructuringElement(cv2.MORPH_RECT, (25,25)) 
+        dilated = cv2.dilate(seg_image, element, iterations=1)
+        eroded = cv2.dilate(dilated, element, iterations=1)
+        
+        # blob detection
+        params = cv2.SimpleBlobDetector_Params()
+        params.minThreshold = 25
+        params.filterByColor = False
+        params.blobColor = 0
+        params.filterByArea = False
+        params.minArea = 500
+        params.maxArea = 5000
+        params.filterByCircularity = False
+        params.minCircularity =.4
+        params.maxCircularity = 1
 
-        for x in range(self.resolution[0]):
-            if np.sum(seg_image[:, x]) > 0.0:
-                end_x = x
+        ver = (cv2.__version__).split('.')
+        if int(ver[0]) < 3 :
+            detector = cv2.SimpleBlobDetector(params)
+        else : 
+            detector = cv2.SimpleBlobDetector_create(params)
+        
+        detector.empty() # <- now works 
+        keypoints = detector.detect(eroded)
+        
+        
+        results = []
+        
+        for keypoint in keypoints:
+            
+            middle_x = int(keypoint.pt[0])
+            middle_y = int(keypoint.pt[1])
+            diameter = int(keypoint.size)
+            radius = int(diameter/2)
+                  
+            start_x, start_y = -1, -1
+            end_x, end_y = -1, -1
+            
+            y_start_search = middle_y - radius+10 if middle_y - radius+10 > 0 else 0
+            y_end_search = middle_y + radius+10 if middle_y + radius+10 < self.resolution[1] else self.resolution[1]
+            x_start_search = middle_x - radius+10 if middle_x - radius+10 > 0 else 0
+            x_end_search = middle_x + radius+10 if middle_x + radius+10 < self.resolution[0] else self.resolution[0]
+            for y in range(y_start_search, y_end_search):
+                if np.sum(seg_image[y, x_start_search:x_end_search]) > 0.0:
+                    end_y = y
+    
+                    if start_y == -1:
+                        start_y = y
+    
+            for x in range(x_start_search, x_end_search):
+                if np.sum(seg_image[y_start_search:y_end_search, x]) > 0.0:
+                    end_x = x
+    
+                    if start_x == -1:
+                        start_x = x
 
-                if start_x == -1:
-                    start_x = x
+            x = start_x -1
+            y = start_y -1
+            w = end_x - start_x + 1
+            h = end_y - start_y
+            class_id = 1
+            confidence = 1
+            
+            try:
+                if h/w < 2:
+                
+                    results.append((x, y, w, h, class_id, confidence, self.trackid))
+                    self.trackid += 1
+                    num += 1
+                    debug_img = cv2.rectangle(seg_image, (x,y), (x+w, y+h), (255, 0, 0), 2)
+            except ZeroDivisionError:
+                pass
+        
+        
+        im_with_keypoints = cv2.drawKeypoints(eroded, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        cv2.imshow("Keypoints", im_with_keypoints)
+        
+        if debug_img is not None:
+            cv2.imshow("segimage", debug_img)
+        cv2.waitKey(10)
+        lol = 2
 
-        x = start_x
-        y = start_y
-        w = end_x - start_x
-        h = end_y - start_y
-        class_id = 1
-        confidence = 1
-
-        return x, y, w, h, class_id, confidence
+        return results, num
 
 
     def run(self, source_folder, dest_folder, lookup=None):
@@ -85,15 +150,25 @@ class GateBoundingBoxAnnotation:
             seg_images = np.load(os.path.join(source_folder, file), allow_pickle=True)
             for i, ts in enumerate(seg_images[:,0]):
                             
-                x, y, w, h, class_id, confidence = self.computeBoundingBox(seg_images[i, 1])
+                results, num = self.computeBoundingBox(seg_images[i, 1])
                 
-                if x != -1:
-                    bbox_out = tuple((ts, x, y, w, h, class_id, confidence, track_id))
-    
-                    temp_arr = np.array(bbox_out, dtype=output_dtype)
-                    output = np.append(output, temp_arr)
-
-                    track_id += 1
+                if num > 0:
+                    if num == 1:
+                        list_res = list(results[0])
+                        list_res.insert(0, ts)
+                        res = tuple(list_res)
+        
+                        temp_arr = np.array(res, dtype=output_dtype)
+                        output = np.append(output, temp_arr)
+                        
+                    elif num > 1:
+                        for i in range(num):
+                            list_res = list(results[i])
+                            list_res.insert(0, ts)
+                            res = tuple(list_res)
+            
+                            temp_arr = np.array(res, dtype=output_dtype)
+                            output = np.append(output, temp_arr)
                         
             split_name = file.split('_')
             save_file = split_name[0] + '_' + split_name[1] + '_' + split_name[2] + '_bbox.npy'    

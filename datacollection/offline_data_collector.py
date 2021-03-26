@@ -47,14 +47,13 @@ class AirSimEventGen:
         self.start_ts = None
 
         if self.segment:
-            found = self.client.simSetSegmentationObjectID("[\w]*", 0, True);
-            found = self.client.simSetSegmentationObjectID("OrangeBall", 255, True);
+            found = self.client.simSetSegmentationObjectID("[\w]*", 255, True)
+            found = self.client.simSetSegmentationObjectID("Segment_gate", 0, True);
+            found = self.client.simSetSegmentationObjectID("segment_gate2_7", 0, True);
+            found = self.client.simSetSegmentationObjectID("segment_gate3_5", 0, True);
+            found = self.client.simSetSegmentationObjectID("segment_gate4_6", 0, True);
             self.segment_request = airsim.ImageRequest("0", airsim.ImageType.Segmentation, False, False)
             self.segment_list = []
-            #found = self.client.simSetSegmentationObjectID("gate1", 255, True);
-            #found = self.client.simSetSegmentationObjectID("gate2", 255, True);
-            #found = self.client.simSetSegmentationObjectID("gate3", 255, True);
-            #found = self.client.simSetSegmentationObjectID("gate4", 255, True);
 
 
         self.rgb_image_shape = [H, W, 3]
@@ -68,7 +67,7 @@ class AirSimEventGen:
             self.fig, self.ax = plt.subplots(1, 1)
 
         ## Attribute collection
-        self.attrFrequency = 2 # Hz
+        self.attrFrequency = 5 # Hz
         if self.attr:
             self.counter = 0
             self.singleDroneAttribute = np.zeros(14)
@@ -150,6 +149,7 @@ if __name__ == "__main__":
         # First collect images and segmentation images if enabled
         while (time.time() - t_start) < 60:
 
+            t2 = time.time_ns()
             response = event_generator.client.simGetImages([event_generator.image_request])
 
             if event_generator.init:
@@ -178,9 +178,11 @@ if __name__ == "__main__":
 
                 img_seg = cv2.cvtColor(img_seg, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
-                event_generator.ax.imshow(img_seg, cmap="viridis")
-                plt.draw()
-                plt.pause(0.001)
+                if event_generator.debug:
+                	print(img_seg)
+	                event_generator.ax.imshow(img_seg, cmap="viridis")
+	                plt.draw()
+	                plt.pause(0.001)
 
                 sync_timestamp = (response_segment[0].time_stamp - event_generator.start_ts) * 1e-3
                 event_generator.segment_list.append((sync_timestamp, img_seg))
@@ -188,6 +190,9 @@ if __name__ == "__main__":
             elif event_generator.attr and (time.time() - t_start_segment) > (1/event_generator.attrFrequency):
                 t_start_segment = time.time()
                 event_generator.collectData((time.time() - t_start) * 1e-3)
+
+            deltat = time.time_ns() - t2
+            print("total: ", deltat/1000000)
 
         # Next run event simulator on collected images
         event_generator.init = True
