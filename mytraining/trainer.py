@@ -346,12 +346,14 @@ class SparseObjectDetModel(AbstractTrainer):
     def buildModel(self):
         """Creates the specified model"""
         self.model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'NCaltech101_ObjectDetection'))
+                                       small_out_map=(self.settings.dataset_name == 'NCaltech101_ObjectDetection' or
+                                                      self.settings.dataset_name == 'N_AU_DR'))
         self.model.to(self.settings.gpu_device)
         self.model_input_size = self.model.spatial_size  # [191, 255]
 
         if self.settings.use_pretrained and (self.settings.dataset_name == 'NCaltech101_ObjectDetection' or
-                                             self.settings.dataset_name == 'Prophesee'):
+                                             self.settings.dataset_name == 'Prophesee' or
+                                             self.settings.dataset_name == 'N_AU_DR'):
             self.loadPretrainedWeights()
 
     def loadPretrainedWeights(self):
@@ -372,9 +374,9 @@ class SparseObjectDetModel(AbstractTrainer):
 
     def train(self):
         """Main training and validation loop"""
-        validation_step = 50 - 48 * (self.settings.dataset_name == 'Prophesee')
+        validation_step = 50 - 48 * (self.settings.dataset_name == 'Prophesee' or self.settings.dataset_name == 'N_AU_DR')
 
-        while True:
+        while self.epoch_step < 1500:
             self.trainEpoch()
             if (self.epoch_step % validation_step) == (validation_step - 1):
                 self.validationEpoch()
@@ -420,7 +422,7 @@ class SparseObjectDetModel(AbstractTrainer):
 
                 with torch.no_grad():
                     detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
-                                               threshold=0.3).long().cpu().numpy()
+                                               threshold=0.6).long().cpu().numpy()
                     detected_bbox = detected_bbox[detected_bbox[:, 0] == 0, 1:-2]
 
                 # Visualization
@@ -476,7 +478,7 @@ class SparseObjectDetModel(AbstractTrainer):
                 model_output = self.model([locations, features, histogram.shape[0]])
                 loss = loss_function(model_output, bounding_box, self.model_input_size)[0]
                 detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
-                                           threshold=0.3)
+                                           threshold=0.6)
                 detected_bbox = nonMaxSuppression(detected_bbox, iou=0.6)
                 detected_bbox = detected_bbox.cpu().numpy()
 

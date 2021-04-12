@@ -38,6 +38,8 @@ class Settings:
                 dataset_specs = dataset['prophesee']
             elif self.dataset_name == 'NCars':
                 dataset_specs = dataset['ncars']
+            elif self.dataset_name == "N_AU_DR":
+                dataset_specs = dataset['n_au_dr']
 
             self.dataset_path = dataset_specs['dataset_path']
             assert os.path.isdir(self.dataset_path)

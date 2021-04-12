@@ -34,13 +34,19 @@ class GateBoundingBoxAnnotation:
         debug_img = None  
         num = 0
 
-        seg_image = seg_image-130
+        #seg_image = seg_image-130
+        seg_image = abs(seg_image - 255)
         
         seg_image = seg_image.astype(np.uint8)
 
-        element = cv2.getStructuringElement(cv2.MORPH_RECT, (25,25)) 
+        element = cv2.getStructuringElement(cv2.MORPH_RECT, (15,15)) 
         dilated = cv2.dilate(seg_image, element, iterations=1)
         eroded = cv2.dilate(dilated, element, iterations=1)
+        
+        # Fill in holes that may remain
+        contour,hier = cv2.findContours(eroded,cv2.RETR_CCOMP,cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contour:
+            cv2.drawContours(eroded,[cnt],0,255,-1)
         
         # blob detection
         params = cv2.SimpleBlobDetector_Params()
@@ -98,16 +104,16 @@ class GateBoundingBoxAnnotation:
             y = start_y -1
             w = end_x - start_x + 1
             h = end_y - start_y
-            class_id = 1
+            class_id = 0
             confidence = 1
             
             try:
                 if h/w < 2:
-                
-                    results.append((x, y, w, h, class_id, confidence, self.trackid))
-                    self.trackid += 1
-                    num += 1
-                    debug_img = cv2.rectangle(seg_image, (x,y), (x+w, y+h), (255, 0, 0), 2)
+                    if x >= 0:         
+                        results.append((x, y, w, h, class_id, confidence, self.trackid))
+                        self.trackid += 1
+                        num += 1
+                        debug_img = cv2.rectangle(seg_image, (x,y), (x+w, y+h), (255, 0, 0), 2)
             except ZeroDivisionError:
                 pass
         
@@ -143,9 +149,9 @@ class GateBoundingBoxAnnotation:
             print("%s created." % dest_folder)
             os.mkdir(dest_folder)
 
-        output = np.empty((0,), dtype = output_dtype)
         for file in segFiles:
             track_id = 0
+            output = np.empty((0,), dtype = output_dtype)
             
             seg_images = np.load(os.path.join(source_folder, file), allow_pickle=True)
             for i, ts in enumerate(seg_images[:,0]):
@@ -169,6 +175,7 @@ class GateBoundingBoxAnnotation:
             
                             temp_arr = np.array(res, dtype=output_dtype)
                             output = np.append(output, temp_arr)
+                            
                         
             split_name = file.split('_')
             save_file = split_name[0] + '_' + split_name[1] + '_' + split_name[2] + '_bbox.npy'    

@@ -31,7 +31,7 @@ class AirSimEventGen:
         self.ev_sim = EventSimulator(H, W)
 
         self.image_request = airsim.ImageRequest(
-            "0", airsim.ImageType.Scene, False, False
+            "cam", airsim.ImageType.Scene, False, False
         )
 
         self.W = W
@@ -49,10 +49,14 @@ class AirSimEventGen:
         if self.segment:
             found = self.client.simSetSegmentationObjectID("[\w]*", 255, True)
             found = self.client.simSetSegmentationObjectID("Segment_gate", 0, True);
+            print(found)
             found = self.client.simSetSegmentationObjectID("segment_gate2_7", 0, True);
+            print(found)
             found = self.client.simSetSegmentationObjectID("segment_gate3_5", 0, True);
-            found = self.client.simSetSegmentationObjectID("segment_gate4_6", 0, True);
-            self.segment_request = airsim.ImageRequest("0", airsim.ImageType.Segmentation, False, False)
+            print(found)
+            found = self.client.simSetSegmentationObjectID("segment_gate4", 0, True);
+            print(found)
+            self.segment_request = airsim.ImageRequest("cam", airsim.ImageType.Segmentation, False, False)
             self.segment_list = []
 
 
@@ -97,11 +101,28 @@ class AirSimEventGen:
     def save_to_files(self):
         if self.segment:
             np.save(self.date + '_' + self.tstart + '_segmentation.npy', self.segment_list)
+            del self.segment_list
+            self.segment_list = []
         elif self.attr:
             np.save(self.date + '_' + self.tstart + '_attr.npy', self.droneAttributes[:,1:])
             self.droneAttributes = np.zeros([14])
+        del self.image_list
+        self.image_list = []
         del self.ev_sim
         self.ev_sim = EventSimulator(self.H, self.W)
+
+
+    def remove_files_and_restart(self):
+        if self.segment:
+            del self.segment_list
+            self.segment_list = []
+        elif self.attr:
+            self.droneAttributes = np.zeros([14])
+        del self.image_list
+        self.image_list = []
+        del self.ev_sim
+        self.ev_sim = EventSimulator(self.H, self.W)
+
 
 
     def _stop_event_gen(self, signal, frame):
@@ -138,92 +159,110 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     event_generator = AirSimEventGen(args.width, args.height, debug=args.debug, segment=args.segment, attr=args.attr)
-    number_of_trials = 2
+    number_of_trials = 50
 
     signal.signal(signal.SIGINT, event_generator._stop_event_gen)
 
     for i in range(number_of_trials):
+        reshape_error = False
         t_start = time.time()
         t_start_segment = t_start
         print("here we go")
         # First collect images and segmentation images if enabled
         while (time.time() - t_start) < 60:
 
-            t2 = time.time_ns()
+            #t2 = time.time_ns()
             response = event_generator.client.simGetImages([event_generator.image_request])
 
             if event_generator.init:
                 event_generator.start_ts = response[0].time_stamp
                 event_generator.init = False
-
-            img = np.reshape(
-                np.fromstring(response[0].image_data_uint8, dtype=np.uint8),
-                event_generator.rgb_image_shape,
-            )
-
-
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
-            # Add small number to avoid issues with log(I)
-            img = cv2.add(img, 0.001)
-
-            event_generator.image_list.append((response[0].time_stamp, img))
-
-            if event_generator.segment and (time.time() - t_start_segment) > (1/event_generator.attrFrequency):
-                t_start_segment = time.time()
-                response_segment = event_generator.client.simGetImages([event_generator.segment_request])
-                img_seg = np.reshape(
-                    np.fromstring(response_segment[0].image_data_uint8, dtype=np.uint8),
+            try:
+                img = np.reshape(
+                    np.fromstring(response[0].image_data_uint8, dtype=np.uint8),
                     event_generator.rgb_image_shape,
                 )
 
-                img_seg = cv2.cvtColor(img_seg, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+                #img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                # Add small number to avoid issues with log(I)
+                img = cv2.add(img, 0.001)
 
                 if event_generator.debug:
-                	print(img_seg)
-	                event_generator.ax.imshow(img_seg, cmap="viridis")
-	                plt.draw()
-	                plt.pause(0.001)
+                    cv2.imshow("debug", img)
+                    cv2.waitKey(1)
 
-                sync_timestamp = (response_segment[0].time_stamp - event_generator.start_ts) * 1e-3
-                event_generator.segment_list.append((sync_timestamp, img_seg))
-            
-            elif event_generator.attr and (time.time() - t_start_segment) > (1/event_generator.attrFrequency):
-                t_start_segment = time.time()
-                event_generator.collectData((time.time() - t_start) * 1e-3)
 
-            deltat = time.time_ns() - t2
-            print("total: ", deltat/1000000)
 
-        # Next run event simulator on collected images
-        event_generator.init = True
-        for img in event_generator.image_list:
+                event_generator.image_list.append((response[0].time_stamp, img))
 
-            if event_generator.init:
-                event_generator.start_ts = img[0]
-                event_generator.init = False
-                continue
+                if event_generator.segment and (time.time() - t_start_segment) > (1/event_generator.attrFrequency):
+                    t_start_segment = time.time()
+                    response_segment = event_generator.client.simGetImages([event_generator.segment_request])
+                    img_seg = np.reshape(
+                        np.fromstring(response_segment[0].image_data_uint8, dtype=np.uint8),
+                        event_generator.rgb_image_shape,
+                    )
 
-            ts_delta = (img[0] - event_generator.start_ts) * 1e-3
+                    img_seg = cv2.cvtColor(img_seg, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
-            # Event sim keeps track of previous image automatically
-            event_img, events = event_generator.ev_sim.image_callback(img[1], ts_delta)
+                    if event_generator.debug:
+                        print(img_seg)
+                        event_generator.ax.imshow(img_seg, cmap="viridis")
+                        plt.draw()
+                        plt.pause(0.001)
 
-            #tnew = time.time_ns()
-            if events is not None and events.shape[0] > 0:
-                events['timestamp'] = (events['timestamp']*1000000).astype(int)
-                dat_events_tools.write_event_buffer(event_generator.event_file, events)
-                if event_generator.debug:
-                    event_generator.visualize_events(event_img)
+                    sync_timestamp = (response_segment[0].time_stamp - event_generator.start_ts) * 1e-3
+                    event_generator.segment_list.append((sync_timestamp, img_seg))
+                
+                elif event_generator.attr and (time.time() - t_start_segment) > (1/event_generator.attrFrequency):
+                    t_start_segment = time.time()
+                    event_generator.collectData((time.time() - t_start) * 1e-3)
 
-        event_generator.save_to_files()
-        event_generator.event_file.close()
-        del event_generator.image_list
-        event_generator.image_list = []
-        if event_generator.segment:
-            del event_generator.segment_list
-            event_generator.segment_list = []
-        event_generator.init = True
-        if i != number_of_trials-1:
+                #deltat = time.time_ns() - t2
+                #print("total: ", deltat/1000000)
+            except Exception as e:
+                print("reshape error. Dropping sequence")
+                print(e)
+                reshape_error = True
+                break
+
+
+
+        if reshape_error == False:
+            # Next run event simulator on collected images
+            event_generator.init = True
+            for img in event_generator.image_list:
+
+                if event_generator.init:
+                    event_generator.start_ts = img[0]
+                    event_generator.init = False
+                    continue
+
+                ts_delta = (img[0] - event_generator.start_ts) * 1e-3
+
+                # Event sim keeps track of previous image automatically
+                event_img, events = event_generator.ev_sim.image_callback(img[1], ts_delta)
+
+                #tnew = time.time_ns()
+                if events is not None and events.shape[0] > 0:
+                    events['timestamp'] = (events['timestamp']*1000000).astype(int)
+                    dat_events_tools.write_event_buffer(event_generator.event_file, events)
+                    if event_generator.debug:
+                        event_generator.visualize_events(event_img)
+
+            event_generator.save_to_files()
+            event_generator.event_file.close()
+
+            event_generator.init = True
+            if i != number_of_trials-1:
+                event_generator.event_file = event_generator.setup_event_file()
+        
+        else:
+            event_generator.remove_files_and_restart()
+            os.remove(event_generator.event_file.name)
+            event_generator.init = True
             event_generator.event_file = event_generator.setup_event_file()
 
 

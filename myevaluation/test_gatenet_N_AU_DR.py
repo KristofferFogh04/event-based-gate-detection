@@ -30,6 +30,7 @@ def toc(tempBool=True):
 def tic():
     # Records a time in TicToc, marks thex_asyn[1].unsqueeze(0) beginning of a time interval
     toc(False)
+    
 import sys, os
 sys.path.insert(0, 'rpg_asynet')
 
@@ -49,19 +50,19 @@ device = torch.device("cpu")
 
 class TestSparseVGG():
 
-    def __init__(self, args, settings, save_dir='log/PropheseeResults',):
+    def __init__(self, args, settings, save_dir='log/N_AU_DR_Results',):
         self.settings = settings
         self.save_dir = save_dir
         self.args = args
         self.multi_processing = args.use_multiprocessing
         self.compute_active_sites = args.compute_active_sites
+        self.asyn = args.asyn
 
-        self.nr_classes = 2
+        self.nr_classes = 1
         self.nr_input_channels = 2
         self.sequence_length = 60
         self.output_map = 6 * 8
         self.model_input_size = torch.tensor([self.settings.height, self.settings.width])
-        self.asyn = 0
 
 
         self.writer = SummaryWriter(self.save_dir)
@@ -75,9 +76,11 @@ class TestSparseVGG():
 
         # ---- Facebook VGG ----
         fb_model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                   small_out_map=(self.settings.dataset_name == 'NCaltech101_ObjectDetection')).eval()
+                                   small_out_map=(self.settings.dataset_name == 'NCaltech101_ObjectDetection' or
+                                                  self.settings.dataset_name == 'N_AU_DR')).eval()
+        print(self.settings.dataset_name == 'N_AU_DR')
         spatial_dimensions = fb_model.spatial_size
-        pth = 'log/prophesee_trained_200epochs/checkpoints/model_step_181.pth'
+        pth = 'log/N_AU_DR_trained_run2_smalloutmap/checkpoints/model_step_27.pth'
         fb_model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
         print("initialized sync fb model")
@@ -111,6 +114,8 @@ class TestSparseVGG():
         trackid = 0
         out_dtype = np.dtype([('ts', '<u8'),('x', '<f4'), ('y', '<f4'), ('w', '<f4'), ('h', '<f4'), ('class_id', 'u1'), ('confidence', '<f4'), ('track_id', '<u4')])
         detected_bounding_boxes = np.empty((0,), dtype = out_dtype)
+        
+        test = test_dataset.__getitem__(1)
 
 
         for i_batch, sample_batched in enumerate(test_dataset):
@@ -133,7 +138,7 @@ class TestSparseVGG():
             toc()
 
             fb_detected_bbox = yoloDetect(fb_output, self.model_input_size.to(fb_output.device),
-                   threshold=0.3)
+                   threshold=0.6)
 
             fb_detected_bbox = nonMaxSuppression(fb_detected_bbox, iou=0.6)
             fb_detected_bbox = fb_detected_bbox.long().cpu().numpy()
@@ -150,7 +155,6 @@ class TestSparseVGG():
                 detected_bounding_boxes = np.append(detected_bounding_boxes, temp_arr)
 
             if self.asyn:
-
                 if i_batch == 0:
                     with torch.no_grad():
                         # Fill asynchronous input representation and compute
@@ -250,6 +254,7 @@ def main():
     parser.add_argument('--representation', default="")
     parser.add_argument('--use_multiprocessing', help='If multiprocessing should be used', action='store_true')
     parser.add_argument('--compute_active_sites', help='If active sites should be calculated', action='store_true')
+    parser.add_argument('--asyn', help='If asynchronous network should be used', action='store_true')
 
     args = parser.parse_args()
     settings_filepath = args.settings_file

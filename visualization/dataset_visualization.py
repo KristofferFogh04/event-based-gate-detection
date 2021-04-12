@@ -24,8 +24,8 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
     # open the video object for the input files
     videos = [PSEELoader(td_file) for td_file in td_files]
     # use the naming pattern to find the corresponding box file
-    box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*.npy')[0]) for td_file in td_files]
-    #box_videos2 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_result.npy')[0]) for td_file in td_files]
+    #box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*.npy')[0]) for td_file in td_files]
+    box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_result.npy')[0]) for td_file in td_files]
     
     height, width = videos[0].get_size()
     if height == 180:
@@ -49,9 +49,44 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
     ts = 0
     ts_last_box = 0
     lol = input("Press any key to start ground truth visualization")
+    counter = 0
 
     print("Visualizing ground truth")
     # while all videos have something to read
+    """
+    while not sum([video.done for video in videos]):
+
+        # load events and boxes from all files
+        events = [video.load_n_events(5000) for video in videos]
+        box_events = [box_video.load_delta_t(delta_t) for box_video in box_videos1]
+        for index, (evs, boxes) in enumerate(zip(events, box_events)):
+            y, x = divmod(index, size_x)
+
+            if len(evs) != 0:
+                ts = evs[0][0]
+            # put the visualization at the right spot in the grid
+            im = frame[y * height:(y + 1) * height, x * width: (x + 1) * width]
+            # call the visualization functions
+            im = vis.make_binary_histo(evs, img=im, width=width, height=height)
+            vis.draw_bboxes(im, boxes, labelmap=labelmap)
+
+            if len(boxes) == 0:
+                vis.draw_bboxes(im, last_boxes, labelmap=labelmap)
+            else:
+                last_boxes = boxes.copy()
+                ts_last_box = ts
+            if ts - ts_last_box > 200000:
+                last_boxes = np.empty((0,))
+        key = input("step")
+        counter += 1
+
+
+        # display the result
+        cv2.imshow('Ground Truth', frame)
+        cv2.waitKey(1)
+
+
+    """
     while not sum([video.done for video in videos]):
 
         # load events and boxes from all files
@@ -80,6 +115,7 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
         # display the result
         cv2.imshow('Ground Truth', frame)
         cv2.waitKey(1)
+
 
     videos = [PSEELoader(td_file) for td_file in td_files]
     cv2.namedWindow('Detected', cv2.WINDOW_NORMAL)
