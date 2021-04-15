@@ -673,7 +673,7 @@ class N_AU_DR(NCaltech101):
             unique_ts, unique_indices = np.unique(dat_bbox['ts'], return_index=True)
 
             for unique_time in unique_ts:
-                sequence_start = self.searchEventSequence(event_file, unique_time, nr_window_events=250000)
+                sequence_start = self.searchEventSequence(event_file, unique_time, nr_window_events=self.nr_events_window)
                 self.sequence_start.append(sequence_start)
 
             file_name_bbox_id += [[file_name, i] for i in range(len(unique_indices))]

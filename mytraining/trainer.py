@@ -415,7 +415,7 @@ class SparseObjectDetModel(AbstractTrainer):
             loss.backward()
             self.optimizer.step()
 
-            if self.batch_step % (self.nr_train_epochs * 50) == 0:
+            if self.batch_step % (self.nr_train_epochs * 5) == 0:
                 batch_one_mask = locations[:, -1] == 0
                 vis_locations = locations[batch_one_mask, :2]
                 features = features[batch_one_mask, :]

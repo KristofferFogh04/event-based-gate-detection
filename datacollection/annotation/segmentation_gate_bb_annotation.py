@@ -99,11 +99,22 @@ class GateBoundingBoxAnnotation:
     
                     if start_x == -1:
                         start_x = x
-
-            x = start_x -1
-            y = start_y -1
-            w = end_x - start_x + 1
-            h = end_y - start_y
+            if x > 4:
+                x = start_x -4
+            else:
+                x = start_x
+            if y > 4:
+                y = start_y -4
+            else:
+                y = start_y
+            if end_x + 8 < self.resolution[0]:
+                w = end_x - start_x + 8
+            else:
+                w = end_x - start_x
+            if end_y + 8 < self.resolution[1]:
+                h = end_y - start_y + 8
+            else:
+                h = end_y - start_y
             class_id = 0
             confidence = 1
             

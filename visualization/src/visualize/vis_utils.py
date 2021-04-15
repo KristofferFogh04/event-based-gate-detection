@@ -6,7 +6,7 @@ from __future__ import print_function
 import numpy as np
 import cv2
 
-GATE_LABELMAP = ["none", "gate"]
+GATE_LABELMAP = ["gate", "none"]
 LABELMAP = ["car", "pedestrian"]
 LABELMAP_LARGE = ['pedestrian', 'two wheeler', 'car', 'truck', 'bus', 'traffic sign', 'traffic light']
 

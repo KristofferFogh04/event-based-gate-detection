@@ -26,6 +26,7 @@ def toc(tempBool=True):
     tempTimeInterval = next(TicToc)
     if tempBool:
         print( "Elapsed time: %f seconds.\n" %tempTimeInterval )
+        return tempTimeInterval
 
 def tic():
     # Records a time in TicToc, marks thex_asyn[1].unsqueeze(0) beginning of a time interval
@@ -57,12 +58,14 @@ class TestSparseVGG():
         self.multi_processing = args.use_multiprocessing
         self.compute_active_sites = args.compute_active_sites
         self.asyn = args.asyn
+        self.yolo_thresh = 0.65
 
         self.nr_classes = 1
         self.nr_input_channels = 2
         self.sequence_length = 60
         self.output_map = 6 * 8
         self.model_input_size = torch.tensor([self.settings.height, self.settings.width])
+        self.total_time = 0
 
 
         self.writer = SummaryWriter(self.save_dir)
@@ -80,7 +83,7 @@ class TestSparseVGG():
                                                   self.settings.dataset_name == 'N_AU_DR')).eval()
         print(self.settings.dataset_name == 'N_AU_DR')
         spatial_dimensions = fb_model.spatial_size
-        pth = 'log/N_AU_DR_trained_run2_smalloutmap/checkpoints/model_step_27.pth'
+        pth = 'log/N_AU_DR_trained_run3_best/checkpoints/model_step_125.pth'
         fb_model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
         print("initialized sync fb model")
@@ -101,7 +104,7 @@ class TestSparseVGG():
         print("initialized asyn vgg model")
 
         # ---- Create Input -----
-        event_window = 25000
+        event_window = 10000
         events_per_step = 100
         number_of_steps = event_window // events_per_step
 
@@ -120,7 +123,7 @@ class TestSparseVGG():
 
         for i_batch, sample_batched in enumerate(test_dataset):
 
-            print("Getting 25000 events for step: " + str(counter))
+            print("Getting " + str(event_window) + " events for step: " + str(counter))
             events, histogram = sample_batched
 
             # Histogram for synchronous network
@@ -135,21 +138,25 @@ class TestSparseVGG():
             # Detect using synchronous fb network on the whole batch
             tic()
             fb_output = fb_model([locations, features])
-            toc()
+            self.total_time += toc()
+            
 
             fb_detected_bbox = yoloDetect(fb_output, self.model_input_size.to(fb_output.device),
-                   threshold=0.6)
+                   threshold=self.yolo_thresh)
 
-            fb_detected_bbox = nonMaxSuppression(fb_detected_bbox, iou=0.6)
-            fb_detected_bbox = fb_detected_bbox.long().cpu().numpy()
+            fb_detected_bbox = nonMaxSuppression(fb_detected_bbox, iou=0.3)
+            fb_detected_bbox_long = fb_detected_bbox.long().cpu().numpy()
 
             # Organizing bounding boxes for saving to npy
-            fb_detected_bbox_out = fb_detected_bbox.copy()
+            fb_detected_bbox_out = fb_detected_bbox_long.copy()
             fb_detected_bbox_out[:,0] = events[0,2]
             fb_detected_bbox_out[:,7] = trackid
+            fb_detected_bbox_out = fb_detected_bbox_out.tolist()
+            for i in range(len(fb_detected_bbox_out)):
+                fb_detected_bbox_out[i][6] = float("{:.2f}".format((fb_detected_bbox.cpu().detach().numpy())[i,7].copy()))
             trackid += 1
 
-            tuples = tuple(tuple(fb_detected_bbox_out_m.tolist()) for fb_detected_bbox_out_m in fb_detected_bbox_out)
+            tuples = tuple(tuple(fb_detected_bbox_out_m) for fb_detected_bbox_out_m in fb_detected_bbox_out)
             for i in range(len(tuples)):
                 temp_arr = np.array(tuples[i], dtype=out_dtype)
                 detected_bounding_boxes = np.append(detected_bounding_boxes, temp_arr)
@@ -241,10 +248,12 @@ class TestSparseVGG():
             if counter % 5 == 0:
                 print("saving")
 
-                file_path = os.path.join(self.save_dir, 'test_results.pth')
-                torch.save({'state_dict': fb_model.state_dict()}, file_path)
+                #file_path = os.path.join(self.save_dir, 'test_results.pth')
+                #torch.save({'state_dict': fb_model.state_dict()}, file_path)
         file_path = os.path.join(self.save_dir, 'result_bounding_boxes.npy')
         np.save(file_path, detected_bounding_boxes)
+        avg_time = self.total_time / counter
+        print("Average time per " + str(event_window) + " events: " + str(avg_time))
 
 
 def main():
