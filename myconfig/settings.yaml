@@ -32,8 +32,8 @@ dataset:
 dir:
   log: 'log/'
 model:
-  # ['fb_sparse_vgg', 'dense_vgg', 'fb_sparse_object_det', 'dense_object_det', 'sparse_gatenet']
-  model_name: 'fb_sparse_object_det'
+  # ['fb_sparse_vgg', 'dense_vgg', 'fb_sparse_object_det', 'dense_object_det', 'sparse_firenet', 'sparse_REDnet']
+  model_name: 'sparse_REDnet' #'fb_sparse_object_det'
 optim:
   batch_size: 15
   init_lr: 1e-4

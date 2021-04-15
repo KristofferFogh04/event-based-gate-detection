@@ -1,0 +1,39 @@
+UNetFire(
+  (head): RecurrentConvLayer(
+    (conv): ConvLayer(
+      (conv2d): Conv2d(5, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    )
+    (recurrent_block): ConvGRU(
+      (reset_gate): Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      (update_gate): Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      (out_gate): Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    )
+  )
+
+
+
+  (resblocks): ModuleList(
+    (0): RecurrentResidualLayer(
+      (conv): ResidualBlock(
+        (conv1): Conv2d(16, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (relu): ReLU(inplace=True)
+        (conv2): Conv2d(16, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      )
+      (recurrent_block): ConvGRU(
+        (reset_gate): Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (update_gate): Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (out_gate): Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      )
+    )
+    (1): ResidualBlock(
+      (conv1): Conv2d(16, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      (relu): ReLU(inplace=True)
+      (conv2): Conv2d(16, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    )
+  )
+
+  
+  (pred): ConvLayer(
+    (conv2d): Conv2d(16, 1, kernel_size=(1, 1), stride=(1, 1))
+  )
+)
