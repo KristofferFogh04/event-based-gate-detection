@@ -40,6 +40,9 @@ from mydataloader.dataset import getDataloader
 from mymodels.asyn_sparse_vgg import EvalAsynSparseVGGModel, asynSparseVGG
 from mymodels.asyn_sparse_vgg_cpp import asynSparseVGGCPP
 from mymodels.facebook_sparse_object_det import FBSparseObjectDet
+from mymodels.REDnet_sparse_object_det import REDnetSparseObjectDet
+from mymodels.custom_REDnetv1_sparse_object_det import customREDnetSparseObjectDet
+from mymodels.firenet_sparse_object_det import FirenetSparseObjectDet
 from mymodels.yolo_detection import yoloDetect
 from mymodels.yolo_detection import nonMaxSuppression
 from mytraining.trainer import AbstractTrainer
@@ -49,7 +52,7 @@ import utils.test_util as test_util
 # DEVICE = torch.device("cuda:0")
 device = torch.device("cpu")
 
-class TestSparseVGG():
+class TestObjectDet():
 
     def __init__(self, args, settings, save_dir='log/N_AU_DR_Results',):
         self.settings = settings
@@ -67,10 +70,25 @@ class TestSparseVGG():
         self.model_input_size = torch.tensor([self.settings.height, self.settings.width])
         self.total_time = 0
 
+        if settings.model_name == 'sparse_REDnet':
+            self.model = REDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR')).eval()
+
+        elif settings.model_name == 'custom_sparse_REDnetv1':
+            self.model = customREDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR')).eval()
+
+        elif settings.model_name == 'fb_sparse_object_det':
+            self.model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR')).eval()
+
+        elif settings.model_name == 'sparse_firenet':
+            self.model = FirenetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR')).eval()
 
         self.writer = SummaryWriter(self.save_dir)
 
-    def test_sparse_VGG(self):
+    def testSparse(self):
         """Tests if output of sparse VGG is equivalent to the facebook implementation"""
         # print('Test: %s' % i_test)
         # print('#######################')
@@ -78,6 +96,77 @@ class TestSparseVGG():
         # print('#######################')
 
         # ---- Facebook VGG ----
+
+        spatial_dimensions = self.model.spatial_size
+        pth = 'log/N_AU_DR_trained_run3_best/checkpoints/model_step_125.pth'
+        self.model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
+
+        # ---- Create Input -----
+        event_window = 10000
+
+        dataloader = getDataloader(self.settings.dataset_name)
+        test_dataset = dataloader(self.settings.dataset_path, 'all', self.settings.height,
+                                        self.settings.width, augmentation=False, mode='testing',
+                                        nr_events_window=event_window, shuffle=False)
+        self.object_classes = test_dataset.object_classes
+        counter = 1
+        trackid = 0
+        out_dtype = np.dtype([('ts', '<u8'),('x', '<f4'), ('y', '<f4'), ('w', '<f4'), ('h', '<f4'), ('class_id', 'u1'), ('confidence', '<f4'), ('track_id', '<u4')])
+        detected_bounding_boxes = np.empty((0,), dtype = out_dtype)
+        
+        test = test_dataset.__getitem__(1)
+
+
+        for i_batch, sample_batched in enumerate(test_dataset):
+
+            print("Getting " + str(event_window) + " events for step: " + str(counter))
+            events, histogram = sample_batched
+
+            # Histogram for synchronous network
+            histogram = torch.from_numpy(histogram[np.newaxis, :, :])
+            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(spatial_dimensions))
+            histogram = histogram.permute(0, 2, 3, 1)
+            locations, features = AbstractTrainer.denseToSparse(histogram)
+
+            list_spatial_dimensions = [spatial_dimensions.cpu().numpy()[0], spatial_dimensions.cpu().numpy()[1]]
+            input_histogram = torch.zeros(list_spatial_dimensions + [2])
+
+            # Detect using synchronous fb network on the whole batch
+            tic()
+            output = self.model([locations, features])
+            self.total_time += toc()
+            
+
+            detected_bbox = yoloDetect(output, self.model_input_size.to(output.device),
+                   threshold=self.yolo_thresh)
+
+            detected_bbox = nonMaxSuppression(detected_bbox, iou=0.3)
+            detected_bbox_long = detected_bbox.long().cpu().numpy()
+
+            # Organizing bounding boxes for saving to npy
+            detected_bbox_out = detected_bbox_long.copy()
+            detected_bbox_out[:,0] = events[0,2]
+            detected_bbox_out[:,7] = trackid
+            detected_bbox_out = detected_bbox_out.tolist()
+            for i in range(len(detected_bbox_out)):
+                detected_bbox_out[i][6] = float("{:.2f}".format((detected_bbox.cpu().detach().numpy())[i,7].copy()))
+            trackid += 1
+
+            tuples = tuple(tuple(detected_bbox_out_m) for detected_bbox_out_m in detected_bbox_out)
+            for i in range(len(tuples)):
+                temp_arr = np.array(tuples[i], dtype=out_dtype)
+                detected_bounding_boxes = np.append(detected_bounding_boxes, temp_arr)
+
+            counter += 1
+
+        file_path = os.path.join(self.save_dir, 'result_bounding_boxes' + self.settings.model_name + '.npy')
+        np.save(file_path, detected_bounding_boxes)
+        avg_time = self.total_time / counter
+        print("Average time per " + str(event_window) + " events: " + str(avg_time))
+
+
+    def testAsyn(self):
+                # ---- Facebook VGG ----
         fb_model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                    small_out_map=(self.settings.dataset_name == 'NCaltech101_ObjectDetection' or
                                                   self.settings.dataset_name == 'N_AU_DR')).eval()
@@ -161,87 +250,50 @@ class TestSparseVGG():
                 temp_arr = np.array(tuples[i], dtype=out_dtype)
                 detected_bounding_boxes = np.append(detected_bounding_boxes, temp_arr)
 
-            if self.asyn:
-                if i_batch == 0:
-                    with torch.no_grad():
-                        # Fill asynchronous input representation and compute
-                        asyn_locations, input_histogram = asyn_model.generateAsynInput(events, spatial_dimensions,
-                                                                               original_shape=[self.settings.height, self.settings.width])
-                        x_asyn = [None] * 5
-                        x_asyn[0] = asyn_locations[:, :2].to(device)
-                        x_asyn[1] = input_histogram.to(device)
-                        # Detect using async network
-                        tic()
-                        asyn_output1 = asyn_model.forward(x_asyn)
-                        toc()
-                        asyn_output = asyn_output1[1].view([-1] + [6,8] + [(self.nr_classes + 5*self.nr_input_channels)])
-                        asyn_detected_bbox = yoloDetect(asyn_output.float(), self.model_input_size.to(asyn_output.device),
-                               threshold=0.3)
-                        asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
-                        asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
-                        
-                    old_events = np.copy(events)
-                    continue
-                
-
-                # Try to detect using asynchronous model  
+            if i_batch == 0:
                 with torch.no_grad():
-                    for i_sequence in range(number_of_steps):
-                        #Generate input reprensetation for asynchrnonous network
-                        #old_batch_evs = old_events[events_per_step*(i_sequence+1):,:]
-                        #new_batch_evs = events[0:events_per_step*(i_sequence+1),:]
-                        #current_batch_evs = np.r_[old_batch_evs, new_batch_evs]
-                        
-                        new_batch_events = events[(events_per_step*i_sequence):(events_per_step*(i_sequence + 1)), :]
-                        update_locations, new_histogram = asyn_model.generateAsynInput(new_batch_events, spatial_dimensions,
-                                                                                   original_shape=[self.settings.height, self.settings.width])
-
-                        input_histogram = input_histogram + new_histogram
-                        x_asyn = [None] * 5
-                        x_asyn[0] = update_locations[:, :2].to(device)
-                        x_asyn[1] = new_histogram.to(device)
-                        # Detect using async network
-                        tic()
-                        asyn_output1 = asyn_model.forward(x_asyn)
-                        toc()
-                        asyn_output = asyn_output1[1].view([-1] + [6,8] + [(self.nr_classes + 5*self.nr_input_channels)])
-                        asyn_detected_bbox = yoloDetect(asyn_output.float(), self.model_input_size.to(asyn_output.device),
-                               threshold=0.3)
-                        asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
-                        asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
+                    # Fill asynchronous input representation and compute
+                    asyn_locations, input_histogram = asyn_model.generateAsynInput(events, spatial_dimensions,
+                                                                           original_shape=[self.settings.height, self.settings.width])
+                    x_asyn = [None] * 5
+                    x_asyn[0] = asyn_locations[:, :2].to(device)
+                    x_asyn[1] = input_histogram.to(device)
+                    # Detect using async network
+                    tic()
+                    asyn_output1 = asyn_model.forward(x_asyn)
+                    toc()
+                    asyn_output = asyn_output1[1].view([-1] + [6,8] + [(self.nr_classes + 5*self.nr_input_channels)])
+                    asyn_detected_bbox = yoloDetect(asyn_output.float(), self.model_input_size.to(asyn_output.device),
+                           threshold=0.3)
+                    asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
+                    asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
+                    
+                old_events = np.copy(events)
+                continue
             
-            """
-            batch_one_mask = locations[:, -1] == 0
-            vis_locations = locations[batch_one_mask, :2]
-            features = features[batch_one_mask, :]
-            vis_detected_bbox = fb_detected_bbox[fb_detected_bbox[:, 0] == 0, 1:-2].astype(np.int)
 
-            image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
-                                                      features=features.cpu().numpy())
+            # Try to detect using asynchronous model  
+            with torch.no_grad():
+                for i_sequence in range(number_of_steps):
+                    #Generate input reprensetation for asynchrnonous network
+                    
+                    new_batch_events = events[(events_per_step*i_sequence):(events_per_step*(i_sequence + 1)), :]
+                    update_locations, new_histogram = asyn_model.generateAsynInput(new_batch_events, spatial_dimensions,
+                                                                               original_shape=[self.settings.height, self.settings.width])
 
-            image = visualizations.drawBoundingBoxes(image, vis_detected_bbox[:, :-1],
-                                                    class_name=[self.object_classes[i]
-                                                                for i in fb_detected_bbox[:, -1]],
-                                                     ground_truth=False, rescale_image=True)
-
-            self.writer.add_image('FB', image, counter, dataformats='HWC')
-
-            
-            batch_one_mask = locations[:, -1] == 0
-            vis_locations = locations[batch_one_mask, :2]
-            features = features[batch_one_mask, :]
-            vis_detected_bbox = asyn_detected_bbox[asyn_detected_bbox[:, 0] == 0, 1:-2].astype(np.int)
-
-            image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
-                                                      features=features.cpu().numpy())
-
-            image = visualizations.drawBoundingBoxes(image, vis_detected_bbox[:, :-1],
-                                                    class_name=[self.object_classes[i]
-                                                                for i in asyn_detected_bbox[:, -1]],
-                                                     ground_truth=False, rescale_image=True)
-
-            self.writer.add_image('ASYN', image, counter, dataformats='HWC')
-            """
+                    input_histogram = input_histogram + new_histogram
+                    x_asyn = [None] * 5
+                    x_asyn[0] = update_locations[:, :2].to(device)
+                    x_asyn[1] = new_histogram.to(device)
+                    # Detect using async network
+                    tic()
+                    asyn_output1 = asyn_model.forward(x_asyn)
+                    toc()
+                    asyn_output = asyn_output1[1].view([-1] + [6,8] + [(self.nr_classes + 5*self.nr_input_channels)])
+                    asyn_detected_bbox = yoloDetect(asyn_output.float(), self.model_input_size.to(asyn_output.device),
+                           threshold=0.3)
+                    asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
+                    asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
 
             counter += 1
 
@@ -271,8 +323,8 @@ def main():
     
     settings = Settings(settings_filepath, generate_log=False)
 
-    tester = TestSparseVGG(args, settings, save_dir)
-    tester.test_sparse_VGG()
+    tester = TestObjectDet(args, settings, save_dir)
+    tester.testSparse()
 
 
 if __name__ == "__main__":
