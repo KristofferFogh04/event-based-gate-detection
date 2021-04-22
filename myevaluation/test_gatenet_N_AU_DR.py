@@ -98,7 +98,7 @@ class TestObjectDet():
         # ---- Facebook VGG ----
 
         spatial_dimensions = self.model.spatial_size
-        pth = 'log/N_AU_DR_trained_run3_best/checkpoints/model_step_125.pth'
+        pth = 'log/prelim_firenet_nogru/checkpoints/model_step_29.pth'
         self.model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
         # ---- Create Input -----

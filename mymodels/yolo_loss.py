@@ -74,6 +74,16 @@ def yoloLoss(model_output, bounding_box, input_shape):
     shape_loss = lambda_coord * shape_loss
     confidence_no_object_loss = lambda_no_object * confidence_no_object_loss
     class_loss = lambda_class * class_loss
+    
+    # Get rid of those nans
+    if torch.isnan(class_loss):
+        class_loss[class_loss != class_loss] = 0
+    if torch.isnan(shape_loss):
+        shape_loss[shape_loss != shape_loss] = 0
+    if torch.isnan(offset_loss):
+        offset_loss[offset_loss != offset_loss] = 0
+    if torch.isnan(confidence_loss):
+        confidence_loss[confidence_loss != confidence_loss] = 0
 
     loss = offset_loss + shape_loss + confidence_loss + confidence_no_object_loss + class_loss
 

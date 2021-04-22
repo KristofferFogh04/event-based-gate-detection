@@ -5,7 +5,7 @@ from mylayers.conv_GRU import ConvGRU
 
 
 class FirenetSparseObjectDet(nn.Module):
-    def __init__(self, nr_classes, nr_box=2, nr_input_channels=2, small_out_map=True):
+    def __init__(self, nr_classes, nr_box=2, nr_input_channels=2, small_out_map=True, freeze_layers=False):
         super(FirenetSparseObjectDet, self).__init__()
         self.nr_classes = nr_classes
         self.nr_box = nr_box
@@ -94,11 +94,27 @@ class FirenetSparseObjectDet(nn.Module):
         self.linear_input_features = spatial_size_product * 256
         self.linear_1 = nn.Linear(self.linear_input_features, 1024)
         self.linear_2 = nn.Linear(1024, spatial_size_product*(nr_classes + 5*self.nr_box))
+        
+        if freeze_layers == True:
+            # Load convolutional layers of model
+            pth = 'log/prelim_firenet_nogru/checkpoints/model_step_3.pth'
+            self.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
+            
+            # Freeze convolutional and linear layers
+            for child in self.conv1.children():
+                for param in child.parameters():
+                    param.requires_grad = False
+            #for child in self.linear_1.children():
+            #    for param in child.parameters():
+            #        param.requires_grad = False
+            #for child in self.linear_2.children():
+            #    for param in child.parameters():
+            #        param.requires_grad = False
 
-    def forward(self, x):
+    def forward(self, x, prev_states=None):
 
-        #if prev_states is None:
-        #    prev_states = [None] * (self.num_recurrent_units)
+        if prev_states is None:
+            prev_states = [None] * (self.num_recurrent_units)
 
         states = []
         state_idx = 0
@@ -106,13 +122,13 @@ class FirenetSparseObjectDet(nn.Module):
         x = self.inputLayer(x)
         x = self.conv1(x)
 
-        #x = self.GRU1(x, prev_states[state_idx])
-        #state_idx += 1
-        #states.append(x)
+        x = self.GRU1(x, prev_states[state_idx])
+        state_idx += 1
+        states.append(x)
 
-        #x = self.GRU2(x, prev_states[state_idx])
-        #state_idx += 1
-        #states.append(x)
+        x = self.GRU2(x, prev_states[state_idx])
+        state_idx += 1
+        states.append(x)
 
         x = self.sparsetodense(x)
         x = x.view(-1, self.linear_input_features)
@@ -121,7 +137,7 @@ class FirenetSparseObjectDet(nn.Module):
         x = self.linear_2(x)
         x = x.view([-1] + self.cnn_spatial_output_size + [(self.nr_classes + 5*self.nr_box)])
 
-        return x
+        return x, states
     
     """ Original firenet architecture. Probably not suitable for object detection
 class FirenetSparseObjectDet(nn.Module):

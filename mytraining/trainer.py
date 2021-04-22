@@ -48,7 +48,7 @@ class AbstractTrainer(abc.ABC):
         self.dataset_loader = Loader
 
         self.writer = SummaryWriter(self.settings.ckpt_dir)
-        if self.settings.model_name == 'sparse_firenest': # REMEMBER TO CHANGE
+        if self.settings.model_name == 'sparse_firenet': 
             self.createRecurrentDatasets()
         else:
             self.createDatasets()
@@ -581,7 +581,8 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
 
         elif self.settings.model_name == 'sparse_firenet':
             self.model = FirenetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'),
+                                       freeze_layers=True)
 
         self.model.to(self.settings.gpu_device)
         self.model_input_size = self.model.spatial_size  # [191, 255]
@@ -590,6 +591,12 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                                              self.settings.dataset_name == 'Prophesee' or
                                              self.settings.dataset_name == 'N_AU_DR'):
             self.loadPretrainedWeights()
+            
+        # Variables for Truncated Backpropagation Through Time
+        self.TBPTT = True
+        self.k1 = 10
+        self.k2 = 20
+        self.retain_graph = self.k1 < self.k2
 
     def loadPretrainedWeights(self):
         """Loads pretrained model weights"""
@@ -624,12 +631,13 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
         self.model = self.model.train()
         loss_function = yoloLoss
         prev_states = None
-
+        states = [(None, None)]
+        outputs = []
+        targets = []
         for i_batch, sample_batched in enumerate(self.train_loader):
             event, bounding_box, histogram = sample_batched
             if histogram.shape[0] < self.settings.batch_size:
                 continue
-            self.optimizer.zero_grad()
 
             # Change size to input size of sparse VGG
             histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2),
@@ -642,23 +650,70 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                                        / self.settings.height).long()
             locations, features = self.denseToSparse(histogram)
 
-            # Deep Learning Magic
-            """ With convGRU
-            if prev_states == None:
-                model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
+            # No Truncated BackProp Through Time      
+            if self.TBPTT == False:
+                self.optimizer.zero_grad()
+                if prev_states == None:
+                    model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
+                else:
+                    model_output, new_states = self.model([locations, features, histogram.shape[0]], [prev_states[0].detach(), prev_states[1].detach()])
+                prev_states = new_states
+                
+                out = loss_function(model_output, bounding_box, self.model_input_size)
+                loss = out[0]
+    
+                # Write losses statistics
+                self.storeLossesObjectDetection(out)
+    
+                loss.backward(retain_graph=True)
+                self.optimizer.step()
+            
+            # Using Truncated Backprop Through Time
             else:
-                model_output, new_states = self.model([locations, features, histogram.shape[0]], [prev_states[0].detach(), prev_states[1].detach()])
-            prev_states = new_states
-            """ 
-            model_output = self.model([locations, features, histogram.shape[0]])
-            out = loss_function(model_output, bounding_box, self.model_input_size)
-            loss = out[0]
+                if states[-1][1] is not None:
+                    state = [states[-1][1][0].detach(), states[-1][1][1].detach()]
+                    state[0].features.requires_grad = True
+                    state[1].features.requires_grad = True
+                else:
+                    state = states[-1][1]
+                
+                model_output, new_state = self.model([locations, features, histogram.shape[0]], state)
+                outputs.append(model_output)
+                states.append((state, new_state))
+                targets.append(bounding_box)
+                
+                while len(states) > self.k2:
+                    del states[0]
+                    del outputs[0]
+                    del targets[0]
+                
+                if (i_batch + 1) % self.k1 == 0:
+                    #out = loss_function(model_output, bounding_box, self.model_input_size)
+                    #loss = out[0]
+                    
+                    # Write losses statistics
+                    #self.storeLossesObjectDetection(out)
+                    
+                    self.optimizer.zero_grad()
+                    
+                    #loss.backward(retain_graph=self.retain_graph)
+                    for i in range(self.k2-1):
+                        if states[-i-2][0] is None:
+                            break
+                        if i < self.k1:
+                            out = loss_function(outputs[-i-1], targets[-i-1], self.model_input_size)
+                            loss = out[0]
+                            loss.backward(retain_graph=self.retain_graph)
+                        curr_grad = [None] * 2
+                        curr_grad[0] = states[-i-1][0][0].features.grad
+                        curr_grad[1] = states[-i-1][0][1].features.grad
+                        states[-i-2][1][0].features.backward(curr_grad[0], retain_graph=self.retain_graph)
+                        states[-i-2][1][1].features.backward(curr_grad[1], retain_graph=self.retain_graph)
+                    self.optimizer.step()
+                    
+                    self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
+                    self.pbar.update(1*self.k1)
 
-            # Write losses statistics
-            self.storeLossesObjectDetection(out)
-
-            loss.backward(retain_graph=True)
-            self.optimizer.step()
 
             if self.batch_step % (self.nr_train_epochs * 5) == 0:
                 batch_one_mask = locations[:, -1] == 0
@@ -681,9 +736,9 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                                                                      for i in detected_bbox[:, -1]],
                                                          ground_truth=False, rescale_image=False)
                 self.writer.add_image('Training/Input Histogram', image, self.epoch_step, dataformats='HWC')
-
-            self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
-            self.pbar.update(1)
+            if self.TBPTT == False:
+                self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
+                self.pbar.update(1)
             self.batch_step += 1
 
         self.writer.add_scalar('Training/Learning_Rate', self.getLearningRate(), self.epoch_step)
@@ -719,11 +774,9 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
             locations, features = self.denseToSparse(histogram)
 
             with torch.no_grad():
-                """
+                
                 model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
                 prev_states = new_states
-                """
-                model_output = self.model([locations, features, histogram.shape[0]])
                 
                 loss = loss_function(model_output, bounding_box, self.model_input_size)[0]
                 detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),

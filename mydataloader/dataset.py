@@ -803,7 +803,7 @@ class N_AU_DR(NCaltech101):
             evts_lo = events[:,2].min()
             bbox_idx = []
             for i, ts in enumerate(dat_bbox['ts']):
-                if evts_lo < ts and evts_hi > ts:
+                if evts_lo < ts and ts < evts_hi:
                     bbox_idx.append(i)
     
             bboxes = dat_bbox[bbox_idx]
