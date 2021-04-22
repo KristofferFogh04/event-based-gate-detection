@@ -7,6 +7,8 @@ from myconfig.settings import Settings
 from mytraining.trainer import SparseObjectDetModel
 from mytraining.trainer import DenseObjectDetModel
 from mytraining.trainer import FBSparseVGGModel
+from mytraining.trainer import SparseRecurrentObjectDetModel
+
 
 
 def main():
@@ -22,18 +24,17 @@ def main():
         trainer = FBSparseVGGModel(settings)
     elif settings.model_name == 'dense_vgg':
         trainer = DenseVGGModel(settings)
-    elif settings.model_name == 'fb_sparse_object_det' or 
-         settings.model_name == 'sparse_REDnet' or 
+    elif (settings.model_name == 'sparse_REDnet' or 
          settings.model_name == 'custom_sparse_REDnetv1' or 
-         settings.model_name == 'sparse_firenet':
+         settings.model_name == 'sparse_firenet'):
+        trainer = SparseRecurrentObjectDetModel(settings)
+    elif settings.model_name == 'fb_sparse_object_det':
         trainer = SparseObjectDetModel(settings)
     elif settings.model_name == 'dense_object_det':
         trainer = DenseObjectDetModel(settings)
     else:
         raise ValueError('Model name %s specified in the settings file is not implemented' % settings.model_name)
     
-
-    trainer = SparseObjectDetModel(settings)
     trainer.train()
 
 

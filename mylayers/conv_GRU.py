@@ -4,6 +4,7 @@ import torch.nn.functional as f
 from torch.nn import init
 
 import sparseconvnet as scn
+from sparseconvnet.activations import Sigmoid, Tanh
 
 
 class ConvGRU(nn.Module):
@@ -13,42 +14,112 @@ class ConvGRU(nn.Module):
     """
 
     def __init__(self, dimension, input_size, hidden_size, kernel_size):
-            super().__init__()
-            padding = kernel_size // 2
-            self.input_size = input_size
-            self.hidden_size = hidden_size
-            self.reset_gate = scn.SubmanifoldConvolution(dimension, input_size + hidden_size, hidden_size, kernel_size, False)
-            self.update_gate = scn.SubmanifoldConvolution(dimension, input_size + hidden_size, hidden_size, kernel_size, False)
-            self.out_gate = scn.SubmanifoldConvolution(dimension, input_size + hidden_size, hidden_size, kernel_size, False)
+        super().__init__()
+        padding = kernel_size // 2
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.sparse_to_dense = scn.sparseToDense.SparseToDense(2, input_size)
+        self.dense_to_sparse = scn.denseToSparse.DenseToSparse(2)
+        self.reset_gate = scn.SubmanifoldConvolution(dimension, input_size + hidden_size, hidden_size, kernel_size, True)
+        self.update_gate = scn.SubmanifoldConvolution(dimension, input_size + hidden_size, hidden_size, kernel_size, True)
+        self.out_gate = scn.SubmanifoldConvolution(dimension, input_size + hidden_size, hidden_size, kernel_size, True)
+        self.sigmoid = Sigmoid()
+        self.tanh = Tanh()
 
-            init.orthogonal_(self.reset_gate.weight)
-            init.orthogonal_(self.update_gate.weight)
-            init.orthogonal_(self.out_gate.weight)
-            init.constant_(self.reset_gate.bias, 0.)
-            init.constant_(self.update_gate.bias, 0.)
-            init.constant_(self.out_gate.bias, 0.)
+        init.orthogonal_(self.reset_gate.weight)
+        init.orthogonal_(self.update_gate.weight)
+        init.orthogonal_(self.out_gate.weight)
+        init.constant_(self.reset_gate.bias, 0.)
+        init.constant_(self.update_gate.bias, 0.)
+        init.constant_(self.out_gate.bias, 0.)
             
-        def input_spatial_size(self, out_size):
-            return out_size
+    def input_spatial_size(self, out_size):
+        return out_size
 
-        def forward(self, input_, prev_state):
+    def forward(self, input_, prev_state):
 
-            # get batch and spatial sizes
-            batch_size = input_.data.size()[0]
-            spatial_size = input_.data.size()[2:]
+        # get batch and spatial sizes
+        batch_size = input_.batch_size()
+        spatial_size = input_.spatial_size
+        
+        dense_input = self.sparse_to_dense(input_)
 
-            # generate empty prev_state, if None is provided
-            if prev_state is None:
-                state_size = [batch_size, self.hidden_size] + list(spatial_size)
-                prev_state = torch.zeros(state_size).to(input_.device)
+        # generate empty prev_state, if None is provided
+        if prev_state is None:
+            none_prev = True
+            state_size = [batch_size, self.hidden_size] + list(spatial_size)
+            dense_prev = torch.zeros(state_size).to('cpu')
+            prev_state = self.dense_to_sparse(dense_prev)
+        else:
+            none_prev = False
+            dense_prev = self.sparse_to_dense(prev_state)
+        
+        stacked_dense_inputs = torch.cat([dense_input, dense_prev], dim=1)
+        stacked_inputs = self.dense_to_sparse(stacked_dense_inputs)
+        update = self.sigmoid(self.update_gate(stacked_inputs))
+        reset = self.sigmoid(self.reset_gate(stacked_inputs))
+        
 
-            # data size is [batch, channel, height, width]
-            stacked_inputs = torch.cat([input_, prev_state], dim=1)
-            update = torch.sigmoid(self.update_gate(stacked_inputs))
-            reset = torch.sigmoid(self.reset_gate(stacked_inputs))
-            out_inputs = torch.tanh(self.out_gate(torch.cat([input_, prev_state * reset], dim=1)))
-            new_state = prev_state * (1 - update) + out_inputs * update
+        if none_prev:
+            out_inputs = self.tanh(self.out_gate(stacked_inputs))
+        else:
+            dense_reset = self.sparse_to_dense(reset)
+            prev_reset_mul = dense_prev * dense_reset
+            stacked_dense_intermediate_inputs = torch.cat([dense_input, prev_reset_mul], dim=1)
+            stacked_intermediate_inputs = self.dense_to_sparse(stacked_dense_intermediate_inputs)
+            out_inputs = self.tanh(self.out_gate(stacked_intermediate_inputs))
+            
+        if none_prev:       
+            new_state = multiply_feature_planes((out_inputs, update))
+        else:
+            dense_update = (1 - self.sparse_to_dense(update))
+            new_state_1_dense = dense_prev * dense_update
+            #new_state_1 = self.dense_to_sparse(new_state_1_dense)
+            
+            new_state_2 = multiply_feature_planes((out_inputs, update))
+            new_state_2_dense = self.sparse_to_dense(new_state_2)
+            
+            new_state_dense = new_state_1_dense + new_state_2_dense
+            new_state = self.dense_to_sparse(new_state_dense)
+            #new_state = scn.add_feature_planes((new_state_1, new_state_2))
 
-            return new_state
+        return new_state
 
+
+def multiply_feature_planes(input):
+    output = scn.SparseConvNetTensor()
+    output.metadata = input[0].metadata
+    output.spatial_size = input[0].spatial_size
+    output.features = input[0].features * input[1].features
+    return output
+
+
+def subtract_constant_feature_planes(input, a):
+    output = scn.SparseConvNetTensor()
+    output.metadata = input.metadata
+    output.spatial_size = input.spatial_size
+    output.features = a - input.features
+    return output
+
+def concatenate_feature_planes(x, y):
+    output = SparseConvNetTensor()
+    
+    cL,cR,L,R = x.metadata.compareSparseHelper(y.metadata, x.spatial_size)
+    output.metadata = x.metadata
+    for r in R:
+        x.metadata.appendMetadata(y.metadata, x.spatial_size)
+    ## merge metadata her
+    output.spatial_size = input[0].spatial_size
+    output.features = torch.cat([i.features for i in input], 1)
+    return output
+
+def concatenate_feature_planes_easy(x, y):
+    output = SparseConvNetTensor()
+    output.metadata = x.metadata
+    x.metadata.appendMetadata(y.metadata, x.spatial_size)
+    ## merge metadata her
+    output.spatial_size = x.spatial_size
+    output.features = torch.cat([i.features for i in input], 1)
+    return output
+    
 

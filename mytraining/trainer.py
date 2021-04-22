@@ -48,7 +48,10 @@ class AbstractTrainer(abc.ABC):
         self.dataset_loader = Loader
 
         self.writer = SummaryWriter(self.settings.ckpt_dir)
-        self.createDatasets()
+        if self.settings.model_name == 'sparse_firenest': # REMEMBER TO CHANGE
+            self.createRecurrentDatasets()
+        else:
+            self.createDatasets()
 
         self.buildModel()
         self.optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),
@@ -109,6 +112,45 @@ class AbstractTrainer(abc.ABC):
                                                 num_workers=self.settings.num_cpu_workers, pin_memory=False)
         self.val_loader = self.dataset_loader(val_dataset, batch_size=self.settings.batch_size,
                                               device=self.settings.gpu_device,
+                                              num_workers=self.settings.num_cpu_workers, pin_memory=False)
+        
+    def createRecurrentDatasets(self):
+        """
+        Creates the validation and the training data based on the lists specified in the config/settings.yaml file.
+        """
+                 
+        train_dataset = self.dataset_builder(self.settings.dataset_path,
+                                             self.settings.object_classes,
+                                             self.settings.height,
+                                             self.settings.width,
+                                             self.settings.nr_events_window,
+                                             augmentation=False,
+                                             mode='training',
+                                             event_representation=self.settings.event_representation,
+                                             shuffle=False,
+                                             recurrent_net=True)
+
+        self.nr_train_epochs = int(train_dataset.nr_samples / self.settings.batch_size) + 1
+        self.nr_classes = train_dataset.nr_classes
+        self.object_classes = train_dataset.object_classes
+
+        val_dataset = self.dataset_builder(self.settings.dataset_path,
+                                           self.settings.object_classes,
+                                           self.settings.height,
+                                           self.settings.width,
+                                           self.settings.nr_events_window,
+                                           mode='validation',
+                                           event_representation=self.settings.event_representation,
+                                           shuffle=False,
+                                           recurrent_net=True)
+        
+        self.nr_val_epochs = int(val_dataset.nr_samples / self.settings.batch_size) + 1
+        
+        self.train_loader = self.dataset_loader(train_dataset, batch_size=self.settings.batch_size,
+                                                device=self.settings.gpu_device, shuffle=False,
+                                                num_workers=self.settings.num_cpu_workers, pin_memory=False)
+        self.val_loader = self.dataset_loader(val_dataset, batch_size=self.settings.batch_size,
+                                              device=self.settings.gpu_device, shuffle=False,
                                               num_workers=self.settings.num_cpu_workers, pin_memory=False)
 
     @staticmethod
@@ -348,21 +390,12 @@ class FBSparseVGGModel(AbstractTrainer):
 class SparseObjectDetModel(AbstractTrainer):
     def buildModel(self):
         """Creates the specified model"""
-        if settings.model_name == 'sparse_REDnet':
-            self.model = REDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
-
-        elif settings.model_name == 'custom_sparse_REDnetv1':
-            self.model = customREDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
-
-        elif settings.model_name == 'fb_sparse_object_det':
+        if self.settings.model_name == 'fb_sparse_object_det':
             self.model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
+        else:
+            raise ValueError("Wrong model specified")
 
-        elif settings.model_name == 'sparse_firenet':
-            self.model = FirenetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
 
         self.model.to(self.settings.gpu_device)
         self.model_input_size = self.model.spatial_size  # [191, 255]
@@ -492,6 +525,206 @@ class SparseObjectDetModel(AbstractTrainer):
 
             with torch.no_grad():
                 model_output = self.model([locations, features, histogram.shape[0]])
+                loss = loss_function(model_output, bounding_box, self.model_input_size)[0]
+                detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
+                                           threshold=0.6)
+                detected_bbox = nonMaxSuppression(detected_bbox, iou=0.6)
+                detected_bbox = detected_bbox.cpu().numpy()
+
+            # Save validation statistics
+            self.saveBoundingBoxes(bounding_box.cpu().numpy(), detected_bbox)
+
+            if self.val_batch_step % (self.nr_val_epochs - 2) == 0:
+                batch_one_mask = locations[:, -1] == 0
+                vis_locations = locations[batch_one_mask, :2]
+                features = features[batch_one_mask, :]
+                vis_detected_bbox = detected_bbox[detected_bbox[:, 0] == 0, 1:-2].astype(np.int)
+
+                image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
+                                                          features=features.cpu().numpy(),
+                                                          bounding_box=bounding_box[0, :, :].cpu().numpy(),
+                                                          class_name=[self.object_classes[i]
+                                                                      for i in bounding_box[0, :, -1]])
+                image = visualizations.drawBoundingBoxes(image, vis_detected_bbox[:, :-1],
+                                                         class_name=[self.object_classes[i]
+                                                                     for i in vis_detected_bbox[:, -1]],
+                                                         ground_truth=False, rescale_image=False)
+                val_images[int(self.val_batch_step // (self.nr_val_epochs - 2))] = image
+
+            self.pbar.set_postfix(ValLoss=loss.data.cpu().numpy())
+            self.pbar.update(1)
+            self.val_batch_step += 1
+            self.validation_loss += loss
+
+        self.validation_loss = self.validation_loss / float(self.val_batch_step)
+        self.saveValidationStatisticsObjectDetection()
+        self.writer.add_image('Validation/Input Histogram', val_images, self.epoch_step, dataformats='NHWC')
+
+        print("ValAcc: " + str(self.validation_accuracy))
+        if self.max_validation_accuracy < self.validation_accuracy:
+            self.max_validation_accuracy = self.validation_accuracy
+            self.saveCheckpoint()
+
+        self.pbar.close()
+
+
+class SparseRecurrentObjectDetModel(AbstractTrainer):
+    def buildModel(self):
+        """Creates the specified model"""
+        if self.settings.model_name == 'sparse_REDnet':
+            self.model = REDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
+
+        elif self.settings.model_name == 'custom_sparse_REDnetv1':
+            self.model = customREDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
+
+        elif self.settings.model_name == 'sparse_firenet':
+            self.model = FirenetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
+
+        self.model.to(self.settings.gpu_device)
+        self.model_input_size = self.model.spatial_size  # [191, 255]
+
+        if self.settings.use_pretrained and (self.settings.dataset_name == 'NCaltech101_ObjectDetection' or
+                                             self.settings.dataset_name == 'Prophesee' or
+                                             self.settings.dataset_name == 'N_AU_DR'):
+            self.loadPretrainedWeights()
+
+    def loadPretrainedWeights(self):
+        """Loads pretrained model weights"""
+        checkpoint = torch.load(self.settings.pretrained_sparse_vgg)
+        try:
+            pretrained_dict = checkpoint['state_dict']
+        except KeyError:
+            pretrained_dict = checkpoint['model']
+
+        pretrained_dict_short = {}
+        for k, v in pretrained_dict.items():
+            if 'sparseModel.25' in k:
+                break
+            pretrained_dict_short[k] = v
+
+        self.model.load_state_dict(pretrained_dict_short, strict=False)
+
+    def train(self):
+        """Main training and validation loop"""
+        validation_step = 50 - 48 * (self.settings.dataset_name == 'Prophesee' or self.settings.dataset_name == 'N_AU_DR')
+
+        while self.epoch_step < 1500:
+            self.trainEpoch()
+            if (self.epoch_step % validation_step) == (validation_step - 1):
+                self.validationEpoch()
+
+            self.epoch_step += 1
+            self.scheduler.step()
+
+    def trainEpoch(self):
+        self.pbar = tqdm.tqdm(total=self.nr_train_epochs, unit='Batch', unit_scale=True)
+        self.model = self.model.train()
+        loss_function = yoloLoss
+        prev_states = None
+
+        for i_batch, sample_batched in enumerate(self.train_loader):
+            event, bounding_box, histogram = sample_batched
+            if histogram.shape[0] < self.settings.batch_size:
+                continue
+            self.optimizer.zero_grad()
+
+            # Change size to input size of sparse VGG
+            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2),
+                                                        torch.Size(self.model_input_size))
+            histogram = histogram.permute(0, 2, 3, 1)
+            # Change x, width and y, height
+            bounding_box[:, :, [0, 2]] = (bounding_box[:, :, [0, 2]] * self.model_input_size[1].float()
+                                       / self.settings.width).long()
+            bounding_box[:, :, [1, 3]] = (bounding_box[:, :, [1, 3]] * self.model_input_size[0].float()
+                                       / self.settings.height).long()
+            locations, features = self.denseToSparse(histogram)
+
+            # Deep Learning Magic
+            """ With convGRU
+            if prev_states == None:
+                model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
+            else:
+                model_output, new_states = self.model([locations, features, histogram.shape[0]], [prev_states[0].detach(), prev_states[1].detach()])
+            prev_states = new_states
+            """ 
+            model_output = self.model([locations, features, histogram.shape[0]])
+            out = loss_function(model_output, bounding_box, self.model_input_size)
+            loss = out[0]
+
+            # Write losses statistics
+            self.storeLossesObjectDetection(out)
+
+            loss.backward(retain_graph=True)
+            self.optimizer.step()
+
+            if self.batch_step % (self.nr_train_epochs * 5) == 0:
+                batch_one_mask = locations[:, -1] == 0
+                vis_locations = locations[batch_one_mask, :2]
+                features = features[batch_one_mask, :]
+
+                with torch.no_grad():
+                    detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
+                                               threshold=0.6).long().cpu().numpy()
+                    detected_bbox = detected_bbox[detected_bbox[:, 0] == 0, 1:-2]
+
+
+                image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
+                                                          features=features.cpu().numpy(),
+                                                          bounding_box=bounding_box[0, :, :].cpu().numpy(),
+                                                          class_name=[self.object_classes[i]
+                                                                      for i in bounding_box[0, :, -1]])
+                image = visualizations.drawBoundingBoxes(image, detected_bbox[:, :-1],
+                                                         class_name=[self.object_classes[i]
+                                                                     for i in detected_bbox[:, -1]],
+                                                         ground_truth=False, rescale_image=False)
+                self.writer.add_image('Training/Input Histogram', image, self.epoch_step, dataformats='HWC')
+
+            self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
+            self.pbar.update(1)
+            self.batch_step += 1
+
+        self.writer.add_scalar('Training/Learning_Rate', self.getLearningRate(), self.epoch_step)
+        self.pbar.close()
+
+    def validationEpoch(self):
+        self.pbar = tqdm.tqdm(total=self.nr_val_epochs, unit='Batch', unit_scale=True)
+        self.resetValidation()
+        self.model = self.model.eval()
+        self.bounding_boxes = BoundingBoxes()
+        loss_function = yoloLoss
+        
+        prev_states = None
+        
+        # Images are upsampled for visualization
+        val_images = np.zeros([2, int(self.model_input_size[0]*1.5), int(self.model_input_size[1]*1.5), 3])
+
+        for i_batch, sample_batched in enumerate(self.val_loader):
+            event, bounding_box, histogram = sample_batched
+            if histogram.shape[0] < self.settings.batch_size:
+                continue
+
+            # Convert spatial dimension to model input size
+            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2),
+                                                        torch.Size(self.model_input_size))
+            histogram = histogram.permute(0, 2, 3, 1)
+
+            # Change x, width and y, height
+            bounding_box[:, :, [0, 2]] = (bounding_box[:, :, [0, 2]] * self.model_input_size[1].float()
+                                          / self.settings.width).long()
+            bounding_box[:, :, [1, 3]] = (bounding_box[:, :, [1, 3]] * self.model_input_size[0].float()
+                                          / self.settings.height).long()
+            locations, features = self.denseToSparse(histogram)
+
+            with torch.no_grad():
+                """
+                model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
+                prev_states = new_states
+                """
+                model_output = self.model([locations, features, histogram.shape[0]])
+                
                 loss = loss_function(model_output, bounding_box, self.model_input_size)[0]
                 detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
                                            threshold=0.6)

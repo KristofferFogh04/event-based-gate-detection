@@ -23,7 +23,7 @@ dataset:
     width: 304
     nr_events_window: 25000
   n_au_dr:
-    dataset_path: "/media/kristoffer/Elements/Datasets/N-AU-DR"
+    dataset_path: "/media/kristoffer/Kristoffer/Datasets/N-AU-DR"
     object_classes: 'all'
     height: 180
     width: 240
@@ -33,7 +33,7 @@ dir:
   log: 'log/'
 model:
   # ['fb_sparse_vgg', 'dense_vgg', 'fb_sparse_object_det', 'dense_object_det', 'sparse_firenet', 'custom_sparse_REDnetv1', 'sparse_REDnet']
-  model_name: 'custom_sparse_REDnetv1' #'fb_sparse_object_det'
+  model_name: 'sparse_firenet' #'fb_sparse_object_det'
 optim:
   batch_size: 15
   init_lr: 1e-4
@@ -50,5 +50,5 @@ checkpoint:
   pretrained_sparse_vgg: 'log/trained-NCaltech/checkpoints/model_step_25.pth'
 hardware:
   # num_cpu_workers: {-1: auto, 0: main thread, >0: ...}
-  num_cpu_workers: -1
-  gpu_device: 0  # [0 or 'cpu']
+  num_cpu_workers: 0
+  gpu_device: 'cpu'  # [0 or 'cpu']

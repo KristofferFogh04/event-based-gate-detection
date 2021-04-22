@@ -9,11 +9,12 @@ import sparseconvnet as scn
 class ConvLSTM(nn.Module):
     """Adapted from: https://github.com/Atcold/pytorch-CortexNet/blob/master/model/ConvLSTMCell.py """
 
-    def __init__(self, dimension, input_size, hidden_size, kernel_size):
+    def __init__(self, dimension, input_size, hidden_size, kernel_size, device=torch.device('cpu')):
         super(ConvLSTM, self).__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
+        self.device = device
         pad = kernel_size // 2
 
         # cache a tensor filled with zeros to avoid reallocating memory at each inference step if --no-recurrent is enabled
@@ -26,8 +27,8 @@ class ConvLSTM(nn.Module):
     def forward(self, input_, prev_state=None):
 
         # get batch and spatial sizes
-        batch_size = input_.data.size()[0]
-        spatial_size = input_.data.size()[2:]
+        batch_size = input_.batch_size()
+        spatial_size = input_.spatial_size
 
         # generate empty prev_state, if None is provided
         if prev_state is None:
@@ -37,16 +38,21 @@ class ConvLSTM(nn.Module):
             if state_size not in self.zero_tensors:
                 # allocate a tensor with size `spatial_size`, filled with zero (if it has not been allocated already)
                 self.zero_tensors[state_size] = (
-                    torch.zeros(state_size).to(input_.device),
-                    torch.zeros(state_size).to(input_.device)
+                    torch.zeros(state_size).to(self.device),
+                    torch.zeros(state_size).to(self.device)
                 )
 
             prev_state = self.zero_tensors[tuple(state_size)]
+            
+            stacked_inputs = input_
+        else:
+            
+            prev_hidden, prev_cell = prev_state
 
-        prev_hidden, prev_cell = prev_state
-
-        # data size is [batch, channel, height, width]
-        stacked_inputs = torch.cat((input_, prev_hidden), 1)
+            # data size is [batch, channel, height, width]
+            stacked_inputs = scn.append_tensors((input_, prev_hidden))
+        
+        #stacked_inputs = torch.cat((input_, prev_hidden), 1)
         gates = self.Gates(stacked_inputs)
 
         # chunk across channel dimension

@@ -594,7 +594,7 @@ class Prophesee(NCaltech101):
 
 class N_AU_DR(NCaltech101):
     def __init__(self, root, object_classes, height, width, nr_events_window=-1, augmentation=False, mode='training',
-                 event_representation='histogram', shuffle=True):
+                 event_representation='histogram', shuffle=True, recurrent_net=False):
         """
         Creates an iterator over the Prophesee object recognition dataset.
 
@@ -624,6 +624,7 @@ class N_AU_DR(NCaltech101):
         self.mode = mode
         self.width = width
         self.height = height
+        self.recurrent_net = recurrent_net
         self.augmentation = augmentation
         self.event_representation = event_representation
         if nr_events_window == -1:
@@ -641,8 +642,11 @@ class N_AU_DR(NCaltech101):
             self.object_classes = object_classes
 
         self.sequence_start = []
-        if self.mode == 'train' or self.mode == 'val':
+        if (self.mode == 'train' or self.mode == 'val') and self.recurrent_net == False:
             self.createAllBBoxDataset()
+        elif (self.mode == 'train' or self.mode == 'val') and self.recurrent_net == True:
+            self.file_bbox = {}
+            self.createAllBBoxStreamingDataset()
         else:
             self.createDataset()
         self.nr_samples = len(self.files)
@@ -652,6 +656,34 @@ class N_AU_DR(NCaltech101):
             random.seed(7)
             random.shuffle(zipped_lists)
             self.files,  self.sequence_start = zip(*zipped_lists)
+
+    def createAllBBoxStreamingDataset(self):
+        """
+        Iterates over the files and stores event-windows over the entire sequence, 
+        including any potential bounding boxes.
+        """        
+        
+        file_name_seq_id = []
+        print('Building the Dataset')
+        pbar = tqdm.tqdm(total=len(self.files), unit='File', unit_scale=True)
+
+        for i_file, file_name in enumerate(self.files):
+            
+            event_file = os.path.join(self.root, file_name + '_td.dat')
+            with open(event_file, "rb") as f:
+                self.start, v_type, ev_size, size = dat_events_tools.parse_header(f)
+            
+            num_events = dat_events_tools.count_events(event_file)
+            sequence_list = []
+            for i in range(num_events// self.nr_events_window):
+                self.sequence_start.append(i*self.nr_events_window*ev_size)
+                
+            file_name_seq_id += [[file_name, i] for i in range(num_events// self.nr_events_window)]
+            pbar.update(1)
+
+        pbar.close()
+        self.files = file_name_seq_id
+        
 
     def createAllBBoxDataset(self):
         """
@@ -684,8 +716,7 @@ class N_AU_DR(NCaltech101):
         
     def createDataset(self):
         """
-        Iterates over the files and stores for each unique bounding box timestep the file name and the index of the
-         unique indices file.
+        Iterates over the files and stores event-windows over the entire sequence.
         """
         file_name_seq_id = []
         print('Building the Dataset')
@@ -701,7 +732,7 @@ class N_AU_DR(NCaltech101):
             for i in range(num_events// self.nr_events_window):
                 self.sequence_start.append(i*self.nr_events_window*ev_size)
                 
-            file_name_seq_id += [[file_name, i] for i in range(len(self.sequence_start))]
+            file_name_seq_id += [[file_name, i] for i in range(num_events// self.nr_events_window)]
             pbar.update(1)
 
         pbar.close()
@@ -715,7 +746,7 @@ class N_AU_DR(NCaltech101):
         """
 
         # Bounding Box
-        if self.mode == 'train' or self.mode == 'val':
+        if (self.mode == 'train' or self.mode == 'val') and self.recurrent_net == False:
             event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
             bbox_file = os.path.join(self.root, self.files[idx][0] + '_bbox.npy')
             f_bbox = open(bbox_file, "rb")
@@ -749,6 +780,42 @@ class N_AU_DR(NCaltech101):
             # Events
             events = self.readEventFile(event_file, self.sequence_start[idx],  nr_window_events=self.nr_events_window)
             histogram = self.generate_input_representation(events, (self.height, self.width))
+            return events, const_size_bbox.astype(np.int64), histogram
+        
+        elif (self.mode == 'train' or self.mode == 'val') and self.recurrent_net == True:
+            
+            # First read the events
+            event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
+            events = self.readEventFile(event_file, self.sequence_start[idx]+self.start, nr_window_events=self.nr_events_window)
+            histogram = self.generate_input_representation(events, (self.height, self.width))
+            
+            # Then read the bounding boxes. If bounding box is included in event timestamps, take it
+            bbox_file = os.path.join(self.root, self.files[idx][0] + '_bbox.npy')
+            f_bbox = open(bbox_file, "rb")
+            # dat_bbox types (v_type):
+            # [('ts', 'uint64'), ('x', 'float32'), ('y', 'float32'), ('w', 'float32'), ('h', 'float32'), (
+            # 'class_id', 'uint8'), ('confidence', 'float32'), ('track_id', 'uint32')]
+            start, v_type, ev_size, size = npy_events_tools.parse_header(f_bbox)
+            dat_bbox = np.fromfile(f_bbox, dtype=v_type, count=-1)
+            f_bbox.close()
+            
+            evts_hi = events[:,2].max()
+            evts_lo = events[:,2].min()
+            bbox_idx = []
+            for i, ts in enumerate(dat_bbox['ts']):
+                if evts_lo < ts and evts_hi > ts:
+                    bbox_idx.append(i)
+    
+            bboxes = dat_bbox[bbox_idx]
+    
+            # Required Information ['x', 'y', 'w', 'h', 'class_id']
+            np_bbox = rfn.structured_to_unstructured(bboxes)[:, [1, 2, 3, 4, 5]]
+            np_bbox = self.cropToFrame(np_bbox)
+    
+            const_size_bbox = np.zeros([self.max_nr_bbox, 5])
+            const_size_bbox[:np_bbox.shape[0], :] = np_bbox
+
+            # Events
             return events, const_size_bbox.astype(np.int64), histogram
             
         else:
