@@ -597,7 +597,7 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
             self.loadPretrainedWeights()
             
         # Variables for Truncated Backpropagation Through Time
-        self.TBPTT = False
+        self.TBPTT = True
         self.k1 = 10
         self.k2 = 20
         self.retain_graph = self.k1 < self.k2
@@ -633,6 +633,9 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
     def trainEpoch(self):
         self.pbar = tqdm.tqdm(total=self.nr_train_epochs, unit='Batch', unit_scale=True)
         self.model = self.model.train()
+        output_prop = False
+        jump_flag = False
+        num_jumps = 0
         loss_function = yoloLoss
         prev_states = None
         states = [(None, None)]
@@ -677,8 +680,8 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                     loss.backward(retain_graph=True)
                     self.optimizer.step()
             
-            # Using Truncated Backprop Through Time
-            else:
+            # Using Truncated Backprop Through Time with multiple output backprop
+            elif self.TBPTT and output_prop:
                 if states[-1][1] is not None:
                     state = [states[-1][1][0].detach(), states[-1][1][1].detach()]
                     state[0].features.requires_grad = True
@@ -722,6 +725,51 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                     
                     self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
                     self.pbar.update(1*self.k1)
+            # Standard Truncated Backprop Through Tume        
+            else:
+                if states[-1][1] is not None:
+                    state = [states[-1][1][0].detach(), states[-1][1][1].detach()]
+                    state[0].features.requires_grad = True
+                    state[1].features.requires_grad = True
+                else:
+                    state = states[-1][1]
+                
+                model_output, new_state = self.model([locations, features, histogram.shape[0]], state)
+                states.append((state, new_state))
+                
+                while len(states) > self.k2:
+                    del states[0]
+                
+                if ((i_batch + 1) % self.k1 == 0) or jump_flag:
+                    if np.count_nonzero(bounding_box.cpu().numpy()) == 0:
+                        jump_flag = True
+                        num_jumps += 1
+                        print("Jumped")
+                    
+                    else:
+                        out = loss_function(model_output, bounding_box, self.model_input_size)
+                        loss = out[0]
+                        
+                        # Write losses statistics
+                        self.storeLossesObjectDetection(out)
+                        
+                        self.optimizer.zero_grad()
+                        
+                        loss.backward(retain_graph=self.retain_graph)
+                        for i in range(self.k2-1):
+                            if states[-i-2][0] is None:
+                                break
+                            curr_grad = [None] * 2
+                            curr_grad[0] = states[-i-1][0][0].features.grad
+                            curr_grad[1] = states[-i-1][0][1].features.grad
+                            states[-i-2][1][0].features.backward(curr_grad[0], retain_graph=self.retain_graph)
+                            states[-i-2][1][1].features.backward(curr_grad[1], retain_graph=self.retain_graph)
+                        self.optimizer.step()
+                        
+                        self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
+                        self.pbar.update(1*self.k1+num_jumps)
+                        jump_flag = False
+                        num_jumps = 0
 
 
             if self.batch_step % (self.nr_train_epochs * 5) == 0:
