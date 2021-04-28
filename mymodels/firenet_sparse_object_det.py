@@ -52,7 +52,7 @@ class FirenetSparseObjectDet(nn.Module):
         self.conv1.add(scn.MaxPooling(dimension, 3, 2))
         nPlanes = out_channels
         
-        # Layer 3 - submanifold convolution
+        # Layer 4 - submanifold convolution
         self.conv2 = scn.Sequential()
         out_channels = 128
         kernel_size = 3
@@ -64,7 +64,7 @@ class FirenetSparseObjectDet(nn.Module):
         self.conv1.add(scn.MaxPooling(dimension, 3, 2))
         nPlanes = out_channels
         
-        # Layer 3 - submanifold convolution
+        # Layer 5 - submanifold convolution
         self.conv2 = scn.Sequential()
         out_channels = 256
         kernel_size = 3
@@ -76,11 +76,11 @@ class FirenetSparseObjectDet(nn.Module):
         self.conv1.add(scn.MaxPooling(dimension, 3, 2))
         nPlanes = out_channels
 
-        # Layer 4 - Gated Recurrent Unit
+        # Layer 6 - Gated Recurrent Unit
         kernel_size = 3
         self.GRU1 = ConvGRU(dimension, nPlanes, out_channels, kernel_size)
 
-        # Layer 5 - Gated Recurrent Unit
+        # Layer 7 - Gated Recurrent Unit
         kernel_size = 3
         self.GRU2 = ConvGRU(dimension, nPlanes, out_channels, kernel_size)
 
@@ -97,13 +97,13 @@ class FirenetSparseObjectDet(nn.Module):
         
         if freeze_layers == True:
             # Load convolutional layers of model
-            pth = 'log/prelim_firenet_nogru/checkpoints/model_step_3.pth'
+            pth = 'log/RNN_trained_run2/checkpoints/model_step_17.pth'
             self.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
             
             # Freeze convolutional and linear layers
-            for child in self.conv1.children():
-                for param in child.parameters():
-                    param.requires_grad = False
+            #for child in self.conv1.children():
+            #    for param in child.parameters():
+            #        param.requires_grad = False
             #for child in self.linear_1.children():
             #    for param in child.parameters():
             #        param.requires_grad = False

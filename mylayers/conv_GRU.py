@@ -6,6 +6,32 @@ from torch.nn import init
 import sparseconvnet as scn
 from sparseconvnet.activations import Sigmoid, Tanh
 
+import time
+
+
+def TicTocGenerator():
+    # Generator that returns time differences
+    ti = 0           # initial time
+    tf = time.time() # final time
+    while True:
+        ti = tf
+        tf = time.time()
+        yield tf-ti # returns the time difference
+
+TicToc = TicTocGenerator() # create an instance of the TicTocGen generator
+
+# This will be the main function through which we define both tic() and toc()
+def toc(tempBool=True):
+    # Prints the time difference yielded by generator instance TicToc
+    tempTimeInterval = next(TicToc)
+    if tempBool:
+        print( "Elapsed time: %f seconds.\n" %tempTimeInterval )
+        return tempTimeInterval
+
+def tic():
+    # Records a time in TicToc, marks thex_asyn[1].unsqueeze(0) beginning of a time interval
+    toc(False)
+
 
 class ConvGRU(nn.Module):
     """
@@ -56,9 +82,9 @@ class ConvGRU(nn.Module):
         
         stacked_dense_inputs = torch.cat([dense_input, dense_prev], dim=1)
         stacked_inputs = self.dense_to_sparse(stacked_dense_inputs)
+
         update = self.sigmoid(self.update_gate(stacked_inputs))
         reset = self.sigmoid(self.reset_gate(stacked_inputs))
-        
 
         if none_prev:
             out_inputs = self.tanh(self.out_gate(stacked_inputs))
@@ -68,7 +94,7 @@ class ConvGRU(nn.Module):
             stacked_dense_intermediate_inputs = torch.cat([dense_input, prev_reset_mul], dim=1)
             stacked_intermediate_inputs = self.dense_to_sparse(stacked_dense_intermediate_inputs)
             out_inputs = self.tanh(self.out_gate(stacked_intermediate_inputs))
-            
+
         if none_prev:       
             new_state = multiply_feature_planes((out_inputs, update))
         else:

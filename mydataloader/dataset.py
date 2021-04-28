@@ -666,12 +666,13 @@ class N_AU_DR(NCaltech101):
         file_name_seq_id = []
         print('Building the Dataset')
         pbar = tqdm.tqdm(total=len(self.files), unit='File', unit_scale=True)
+        self.start = {}
 
         for i_file, file_name in enumerate(self.files):
             
             event_file = os.path.join(self.root, file_name + '_td.dat')
             with open(event_file, "rb") as f:
-                self.start, v_type, ev_size, size = dat_events_tools.parse_header(f)
+                self.start[file_name], v_type, ev_size, size = dat_events_tools.parse_header(f)
             
             num_events = dat_events_tools.count_events(event_file)
             sequence_list = []
@@ -786,7 +787,7 @@ class N_AU_DR(NCaltech101):
             
             # First read the events
             event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
-            events = self.readEventFile(event_file, self.sequence_start[idx]+self.start, nr_window_events=self.nr_events_window)
+            events = self.readEventFile(event_file, self.sequence_start[idx]+self.start[self.files[idx][0]], nr_window_events=self.nr_events_window)
             histogram = self.generate_input_representation(events, (self.height, self.width))
             
             # Then read the bounding boxes. If bounding box is included in event timestamps, take it

@@ -48,7 +48,7 @@ class AbstractTrainer(abc.ABC):
         self.dataset_loader = Loader
 
         self.writer = SummaryWriter(self.settings.ckpt_dir)
-        if self.settings.model_name == 'sparse_firenet': 
+        if self.settings.model_name == 'sparse_firenet':
             self.createRecurrentDatasets()
         else:
             self.createDatasets()
@@ -205,13 +205,17 @@ class AbstractTrainer(abc.ABC):
         :param detected_bbox[0, :]: [batch_idx, u, v, w, h, pred_class_id, pred_class_score, object score]
         """
         image_size = self.model_input_size.cpu().numpy()
+        gt_batch_indices = []
         for i_batch in range(gt_bbox.shape[0]):
+            batch_noted = False
             for i_gt in range(gt_bbox.shape[1]):
                 gt_bbox_sample = gt_bbox[i_batch, i_gt, :]
                 id_image = self.val_batch_step * self.settings.batch_size + i_batch
                 if gt_bbox[i_batch, i_gt, :].sum() == 0:
                     break
-
+                if batch_noted == False:            
+                    gt_batch_indices.append(i_batch)
+                    batch_noted = True
                 bb_gt = BoundingBox(id_image, gt_bbox_sample[-1], gt_bbox_sample[0], gt_bbox_sample[1],
                                     gt_bbox_sample[2], gt_bbox_sample[3], image_size, BBType.GroundTruth)
                 self.bounding_boxes.addBoundingBox(bb_gt)
@@ -219,11 +223,11 @@ class AbstractTrainer(abc.ABC):
         for i_det in range(detected_bbox.shape[0]):
             det_bbox_sample = detected_bbox[i_det, :]
             id_image = self.val_batch_step * self.settings.batch_size + det_bbox_sample[0]
-
-            bb_det = BoundingBox(id_image, det_bbox_sample[5], det_bbox_sample[1], det_bbox_sample[2],
+            if detected_bbox[i_det, 0] in gt_batch_indices:
+                bb_det = BoundingBox(id_image, det_bbox_sample[5], det_bbox_sample[1], det_bbox_sample[2],
                                  det_bbox_sample[3], det_bbox_sample[4], image_size, BBType.Detected,
                                  det_bbox_sample[6])
-            self.bounding_boxes.addBoundingBox(bb_det)
+                self.bounding_boxes.addBoundingBox(bb_det)
 
     def saveValidationStatisticsObjectDetection(self):
         """Saves the statistice relevant for object detection"""
@@ -593,7 +597,7 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
             self.loadPretrainedWeights()
             
         # Variables for Truncated Backpropagation Through Time
-        self.TBPTT = True
+        self.TBPTT = False
         self.k1 = 10
         self.k2 = 20
         self.retain_graph = self.k1 < self.k2
@@ -637,6 +641,10 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
         for i_batch, sample_batched in enumerate(self.train_loader):
             event, bounding_box, histogram = sample_batched
             if histogram.shape[0] < self.settings.batch_size:
+                prev_states = None
+                continue
+            elif (torch.max(event[:,2]) - torch.min(event[:,2])) > 50000000:
+                prev_states = None
                 continue
 
             # Change size to input size of sparse VGG
@@ -778,16 +786,22 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                 model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
                 prev_states = new_states
                 
-                loss = loss_function(model_output, bounding_box, self.model_input_size)[0]
-                detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
-                                           threshold=0.6)
-                detected_bbox = nonMaxSuppression(detected_bbox, iou=0.6)
-                detected_bbox = detected_bbox.cpu().numpy()
+                gt_bbox = bounding_box.cpu().numpy()
+                if np.count_nonzero(gt_bbox) != 0:
+                                   
+                    loss = loss_function(model_output, bounding_box, self.model_input_size)[0]
+                    detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
+                                               threshold=0.6)
+                    detected_bbox = nonMaxSuppression(detected_bbox, iou=0.3)
+                    detected_bbox = detected_bbox.cpu().numpy()
+                    
+                    self.saveBoundingBoxes(gt_bbox, detected_bbox)
+                    self.validation_loss += loss
+                    self.val_batch_step += 1
+                    self.pbar.set_postfix(ValLoss=loss.data.cpu().numpy())
+                    self.pbar.update(1)
 
-            # Save validation statistics
-            self.saveBoundingBoxes(bounding_box.cpu().numpy(), detected_bbox)
-
-            if self.val_batch_step % (self.nr_val_epochs - 2) == 0:
+            if self.val_batch_step % (self.nr_val_epochs - 2) == 0 and False:
                 batch_one_mask = locations[:, -1] == 0
                 vis_locations = locations[batch_one_mask, :2]
                 features = features[batch_one_mask, :]
@@ -804,16 +818,12 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                                                          ground_truth=False, rescale_image=False)
                 val_images[int(self.val_batch_step // (self.nr_val_epochs - 2))] = image
 
-            self.pbar.set_postfix(ValLoss=loss.data.cpu().numpy())
-            self.pbar.update(1)
-            self.val_batch_step += 1
-            self.validation_loss += loss
 
         self.validation_loss = self.validation_loss / float(self.val_batch_step)
         self.saveValidationStatisticsObjectDetection()
-        self.writer.add_image('Validation/Input Histogram', val_images, self.epoch_step, dataformats='NHWC')
-
         print("ValAcc: " + str(self.validation_accuracy))
+        #self.writer.add_image('Validation/Input Histogram', val_images, self.epoch_step, dataformats='NHWC')
+
         if self.max_validation_accuracy < self.validation_accuracy:
             self.max_validation_accuracy = self.validation_accuracy
             self.saveCheckpoint()

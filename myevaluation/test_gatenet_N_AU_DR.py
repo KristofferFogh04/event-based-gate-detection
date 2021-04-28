@@ -98,7 +98,7 @@ class TestObjectDet():
         # ---- Facebook VGG ----
 
         spatial_dimensions = self.model.spatial_size
-        pth = 'log/prelim_firenet_nogru/checkpoints/model_step_29.pth'
+        pth = 'log/N_AU_DR_VGG_run3/checkpoints/model_step_125.pth'
         self.model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
         # ---- Create Input -----
@@ -134,6 +134,87 @@ class TestObjectDet():
             # Detect using synchronous fb network on the whole batch
             tic()
             output = self.model([locations, features])
+            self.total_time += toc()
+            
+
+            detected_bbox = yoloDetect(output, self.model_input_size.to(output.device),
+                   threshold=self.yolo_thresh)
+
+            detected_bbox = nonMaxSuppression(detected_bbox, iou=0.3)
+            detected_bbox_long = detected_bbox.long().cpu().numpy()
+
+            # Organizing bounding boxes for saving to npy
+            detected_bbox_out = detected_bbox_long.copy()
+            detected_bbox_out[:,0] = events[0,2]
+            detected_bbox_out[:,7] = trackid
+            detected_bbox_out = detected_bbox_out.tolist()
+            for i in range(len(detected_bbox_out)):
+                detected_bbox_out[i][6] = float("{:.2f}".format((detected_bbox.cpu().detach().numpy())[i,7].copy()))
+            trackid += 1
+
+            tuples = tuple(tuple(detected_bbox_out_m) for detected_bbox_out_m in detected_bbox_out)
+            for i in range(len(tuples)):
+                temp_arr = np.array(tuples[i], dtype=out_dtype)
+                detected_bounding_boxes = np.append(detected_bounding_boxes, temp_arr)
+
+            counter += 1
+
+        file_path = os.path.join(self.save_dir, 'result_bounding_boxes' + self.settings.model_name + '.npy')
+        np.save(file_path, detected_bounding_boxes)
+        avg_time = self.total_time / counter
+        print("Average time per " + str(event_window) + " events: " + str(avg_time))
+
+
+    def testSparseRecurrent(self):
+        """Tests if output of sparse VGG is equivalent to the facebook implementation"""
+        # print('Test: %s' % i_test)
+        # print('#######################')
+        # print('#       New Test      #')
+        # print('#######################')
+
+        # ---- Facebook VGG ----
+
+        spatial_dimensions = self.model.spatial_size
+        pth = 'log/RNN_trained_run2/checkpoints/model_step_17.pth'
+        self.model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
+
+        # ---- Create Input -----
+        event_window = 10000
+
+        dataloader = getDataloader(self.settings.dataset_name)
+        test_dataset = dataloader(self.settings.dataset_path, 'all', self.settings.height,
+                                        self.settings.width, augmentation=False, mode='testing',
+                                        nr_events_window=event_window, shuffle=False)
+        self.object_classes = test_dataset.object_classes
+        counter = 1
+        trackid = 0
+        out_dtype = np.dtype([('ts', '<u8'),('x', '<f4'), ('y', '<f4'), ('w', '<f4'), ('h', '<f4'), ('class_id', 'u1'), ('confidence', '<f4'), ('track_id', '<u4')])
+        detected_bounding_boxes = np.empty((0,), dtype = out_dtype)
+        
+        test = test_dataset.__getitem__(1)
+        prev_states = None
+
+        for i_batch, sample_batched in enumerate(test_dataset):
+
+            print("Getting " + str(event_window) + " events for step: " + str(counter))
+            events, histogram = sample_batched
+
+            # Histogram for synchronous network
+            histogram = torch.from_numpy(histogram[np.newaxis, :, :])
+            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(spatial_dimensions))
+            histogram = histogram.permute(0, 2, 3, 1)
+            locations, features = AbstractTrainer.denseToSparse(histogram)
+
+            list_spatial_dimensions = [spatial_dimensions.cpu().numpy()[0], spatial_dimensions.cpu().numpy()[1]]
+            input_histogram = torch.zeros(list_spatial_dimensions + [2])
+
+            # Detect using synchronous fb network on the whole batch
+            tic()
+            if prev_states == None:
+                output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
+            else:
+                output, new_states = self.model([locations, features, histogram.shape[0]], [prev_states[0].detach(), prev_states[1].detach()])
+            prev_states = new_states
             self.total_time += toc()
             
 
@@ -324,7 +405,7 @@ def main():
     settings = Settings(settings_filepath, generate_log=False)
 
     tester = TestObjectDet(args, settings, save_dir)
-    tester.testSparse()
+    tester.testSparseRecurrent()
 
 
 if __name__ == "__main__":
