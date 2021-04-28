@@ -667,14 +667,15 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                     model_output, new_states = self.model([locations, features, histogram.shape[0]], [prev_states[0].detach(), prev_states[1].detach()])
                 prev_states = new_states
                 
-                out = loss_function(model_output, bounding_box, self.model_input_size)
-                loss = out[0]
+                if np.count_nonzero(bounding_box.cpu().numpy()) != 0:
+                    out = loss_function(model_output, bounding_box, self.model_input_size)
+                    loss = out[0]
     
-                # Write losses statistics
-                self.storeLossesObjectDetection(out)
+                    # Write losses statistics
+                    self.storeLossesObjectDetection(out)
     
-                loss.backward(retain_graph=True)
-                self.optimizer.step()
+                    loss.backward(retain_graph=True)
+                    self.optimizer.step()
             
             # Using Truncated Backprop Through Time
             else:
