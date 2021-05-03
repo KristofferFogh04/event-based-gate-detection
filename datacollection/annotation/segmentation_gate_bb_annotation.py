@@ -189,7 +189,7 @@ class GateBoundingBoxAnnotation:
                             
                         
             split_name = file.split('_')
-            save_file = split_name[0] + '_' + split_name[1] + '_' + split_name[2] + '_bbox.npy'    
+            save_file = split_name[0] + '_' + split_name[1] + '_' + split_name[2] + '_' + split_name[3] + '_bbox.npy'    
             np.save(os.path.join(dest_folder, save_file), output)
                     
 

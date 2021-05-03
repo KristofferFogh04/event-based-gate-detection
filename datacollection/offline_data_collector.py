@@ -79,7 +79,7 @@ class AirSimEventGen:
 
     def setup_event_file(self):
         self.date = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-        self.event_filename = self.date + '_' + self.tstart + '_td.dat'
+        self.event_filename = self.date + '_' + self.tstart + '_' + str(self.ev_sim.tol) + '_td.dat'
         event_file = dat_events_tools.write_header(self.event_filename, self.H, self.W)
         return event_file
 
@@ -100,7 +100,7 @@ class AirSimEventGen:
 
     def save_to_files(self):
         if self.segment:
-            np.save(self.date + '_' + self.tstart + '_segmentation.npy', self.segment_list)
+            np.save(self.date + '_' + self.tstart + '_' + str(self.ev_sim.tol) + '_segmentation.npy', self.segment_list)
             del self.segment_list
             self.segment_list = []
         elif self.attr:

@@ -7,7 +7,7 @@ EVENT_TYPE = np.dtype(
     [("timestamp", "f8"), ("x", "u2"), ("y", "u2"), ("polarity", "b")], align=True
 )
 
-TOL = 0.5
+TOL = 0.1
 MINIMUM_CONTRAST_THRESHOLD = 0.01
 
 CONFIG = SimpleNamespace(
@@ -92,6 +92,7 @@ class EventSimulator:
             self.init(first_image, first_time)
 
         self.npix = H * W
+        self.tol = TOL
 
     def init(self, first_image, first_time):
         print("Initialized event camera simulator with sensor size:", first_image.shape)

@@ -97,7 +97,7 @@ class FirenetSparseObjectDet(nn.Module):
         
         if freeze_layers == True:
             # Load convolutional layers of model
-            pth = 'log/RNN_trained_run2/checkpoints/model_step_17.pth'
+            pth = 'log/pretrained_RNN_backbone_96/checkpoints/model_step_53.pth'
             self.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
             
             # Freeze convolutional and linear layers

@@ -67,19 +67,18 @@ class ConvGRU(nn.Module):
         # get batch and spatial sizes
         batch_size = input_.batch_size()
         spatial_size = input_.spatial_size
-        
         dense_input = self.sparse_to_dense(input_)
 
         # generate empty prev_state, if None is provided
         if prev_state is None:
             none_prev = True
             state_size = [batch_size, self.hidden_size] + list(spatial_size)
-            dense_prev = torch.zeros(state_size).to('cpu')
+            dense_prev = torch.zeros(state_size, device='cpu')
+            #dense_prev = torch.zeros(state_size)
             prev_state = self.dense_to_sparse(dense_prev)
         else:
             none_prev = False
             dense_prev = self.sparse_to_dense(prev_state)
-        
         stacked_dense_inputs = torch.cat([dense_input, dense_prev], dim=1)
         stacked_inputs = self.dense_to_sparse(stacked_dense_inputs)
 

@@ -49,7 +49,7 @@ from mytraining.trainer import AbstractTrainer
 import rpg_asynet.utils.visualizations as visualizations
 import utils.test_util as test_util
 
-# DEVICE = torch.device("cuda:0")
+#device = torch.device("cuda:0")
 device = torch.device("cpu")
 
 class TestObjectDet():
@@ -61,7 +61,7 @@ class TestObjectDet():
         self.multi_processing = args.use_multiprocessing
         self.compute_active_sites = args.compute_active_sites
         self.asyn = args.asyn
-        self.yolo_thresh = 0.65
+        self.yolo_thresh = 0.71
 
         self.nr_classes = 1
         self.nr_input_channels = 2
@@ -70,6 +70,7 @@ class TestObjectDet():
         self.model_input_size = torch.tensor([self.settings.height, self.settings.width])
         self.total_time = 0
 
+        #settings.model_name = 'fb_sparse_object_det'
         if settings.model_name == 'sparse_REDnet':
             self.model = REDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'N_AU_DR')).eval()
@@ -98,11 +99,11 @@ class TestObjectDet():
         # ---- Facebook VGG ----
 
         spatial_dimensions = self.model.spatial_size
-        pth = 'log/N_AU_DR_VGG_run3/checkpoints/model_step_125.pth'
+        pth = 'log/fb_sparse_obj_det_dataset2_98/checkpoints/model_step_395.pth'
         self.model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
         # ---- Create Input -----
-        event_window = 10000
+        event_window = 20000
 
         dataloader = getDataloader(self.settings.dataset_name)
         test_dataset = dataloader(self.settings.dataset_path, 'all', self.settings.height,
@@ -123,7 +124,7 @@ class TestObjectDet():
             events, histogram = sample_batched
 
             # Histogram for synchronous network
-            histogram = torch.from_numpy(histogram[np.newaxis, :, :])
+            histogram = torch.from_numpy(histogram[np.newaxis, :, :]).to(device)
             histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(spatial_dimensions))
             histogram = histogram.permute(0, 2, 3, 1)
             locations, features = AbstractTrainer.denseToSparse(histogram)
@@ -175,7 +176,7 @@ class TestObjectDet():
         # ---- Facebook VGG ----
 
         spatial_dimensions = self.model.spatial_size
-        pth = 'log/RNN_trained_run2/checkpoints/model_step_17.pth'
+        pth = 'log/RNN_TBPTT_trained_run4_93/checkpoints/model_step_15.pth'
         self.model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
         # ---- Create Input -----
@@ -405,7 +406,7 @@ def main():
     settings = Settings(settings_filepath, generate_log=False)
 
     tester = TestObjectDet(args, settings, save_dir)
-    tester.testSparseRecurrent()
+    tester.testSparse()
 
 
 if __name__ == "__main__":
