@@ -47,6 +47,8 @@ class Settings:
             self.height = dataset_specs['height']
             self.width = dataset_specs['width']
             self.nr_events_window = dataset_specs['nr_events_window']
+            self.temporal_window = dataset_specs['temporal_window']
+            self.delta_t = dataset_specs['delta_t']
 
             # --- checkpoint ---
             checkpoint = settings['checkpoint']

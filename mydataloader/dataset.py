@@ -3,6 +3,7 @@ import tqdm
 import random
 import numpy as np
 from os import listdir
+import os
 from os.path import join
 import event_representations as er
 from numpy.lib import recfunctions as rfn
@@ -594,7 +595,7 @@ class Prophesee(NCaltech101):
 
 class N_AU_DR(NCaltech101):
     def __init__(self, root, object_classes, height, width, nr_events_window=-1, augmentation=False, mode='training',
-                 event_representation='histogram', shuffle=True, recurrent_net=False):
+                 event_representation='histogram', shuffle=True, recurrent_net=False, temporal_window=False, delta_t=-1):
         """
         Creates an iterator over the Prophesee object recognition dataset.
 
@@ -625,12 +626,20 @@ class N_AU_DR(NCaltech101):
         self.width = width
         self.height = height
         self.recurrent_net = recurrent_net
+        self.temporal_window = temporal_window
         self.augmentation = augmentation
         self.event_representation = event_representation
-        if nr_events_window == -1:
-            self.nr_events_window = 250000
+        self.nr_events_window = 250000
+        if not self.temporal_window:
+            if nr_events_window == -1:
+                self.nr_events_window = 250000
+            else:
+                self.nr_events_window = nr_events_window
         else:
-            self.nr_events_window = nr_events_window
+            if delta_t == -1:
+                self.delta_t = 20000 # microseconds
+            else:
+                self.delta_t = delta_t
 
         self.max_nr_bbox = 15
 
@@ -704,10 +713,14 @@ class N_AU_DR(NCaltech101):
             f_bbox.close()
 
             unique_ts, unique_indices = np.unique(dat_bbox['ts'], return_index=True)
-
             for unique_time in unique_ts:
-                sequence_start = self.searchEventSequence(event_file, unique_time, nr_window_events=self.nr_events_window)
-                self.sequence_start.append(sequence_start)
+                if not self.temporal_window:
+                    sequence_start = self.searchEventSequence(event_file, unique_time, nr_window_events=self.nr_events_window)
+                    self.sequence_start.append(sequence_start)
+                else:
+                    t_start = unique_time - self.delta_t/2
+                    sequence_start = self.searchEventSequence(event_file, t_start, nr_window_events=1000)
+                    self.sequence_start.append((sequence_start, t_start))
 
             file_name_bbox_id += [[file_name, i] for i in range(len(unique_indices))]
             pbar.update(1)
@@ -745,7 +758,6 @@ class N_AU_DR(NCaltech101):
         :param idx:
         :return: x,y,t,p,  label
         """
-
         # Bounding Box
         if (self.mode == 'train' or self.mode == 'val') and self.recurrent_net == False:
             event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
@@ -779,7 +791,10 @@ class N_AU_DR(NCaltech101):
             const_size_bbox[:np_bbox.shape[0], :] = np_bbox
 
             # Events
-            events = self.readEventFile(event_file, self.sequence_start[idx],  nr_window_events=self.nr_events_window)
+            if not self.temporal_window:
+                events = self.readEventFile(event_file, self.sequence_start[idx], nr_window_events=self.nr_events_window)
+            else:
+                events = self.load_delta_t(event_file, self.sequence_start[idx][0], self.sequence_start[idx][1],  delta_t=self.delta_t)
             histogram = self.generate_input_representation(events, (self.height, self.width))
             return events, const_size_bbox.astype(np.int64), histogram
         
@@ -877,6 +892,57 @@ class N_AU_DR(NCaltech101):
         events_np = np.stack([x, y, dat_event['ts'], p], axis=-1)
 
         return events_np
+    
+    def load_delta_t(self, event_file, sequence_start, t_start, delta_t):
+
+        if delta_t < 1:
+            raise ValueError("load_delta_t(): delta_t must be at least 1 micro-second: {}".format(delta_t))
+
+        file_handle = open(event_file, "rb")
+        ev_start, ev_type, ev_size, img_size = dat_events_tools.parse_header(file_handle)
+        file_handle.seek(0, os.SEEK_END)
+        _end = file_handle.tell()
+        
+        file_handle.seek(sequence_start)    
+        final_time = t_start + delta_t
+        tmp_time = t_start
+        start = file_handle.tell()
+        pos = start
+        nevs = 0
+        batch = 100
+        first = True
+        
+        # data is read by buffers until enough events are read or until the end of the file
+        while tmp_time < final_time and pos < _end:
+            count = (min(_end, pos + batch * ev_size) - pos) // ev_size
+            buffer = np.fromfile(file_handle, dtype=[('ts', 'u4'), ('_', 'i4')], count=count)
+            tmp_time = buffer[-1][0]
+                   
+            x = np.bitwise_and(buffer["_"], 16383)
+            y = np.right_shift(
+                np.bitwise_and(buffer["_"], 268419072), 14)
+            p = np.right_shift(np.bitwise_and(buffer["_"], 268435456), 28)
+            p[p == 0] = -1
+            events_np = np.stack([x, y, buffer['ts'], p], axis=-1)
+            if first:
+                event_buffer = events_np
+                first = False
+            else:
+                event_buffer = np.append(event_buffer, events_np, axis=0)
+            
+            nevs += count
+            pos = file_handle.tell()
+        if tmp_time >= final_time:
+            current_time = final_time
+        else:
+            current_time = tmp_time + 1
+        assert len(event_buffer) > 0
+        
+        #idx = np.searchsorted(event_buffer[-1]['t'], final_time)
+        #event_buffer[-1] = event_buffer[-1][:idx]
+        #event_buffer = np.concatenate(event_buffer)
+        #idx = len(event_buffer)
+        return event_buffer
 
     def cropToFrame(self, np_bbox):
         """Checks if bounding boxes are inside frame. If not crop to border"""
@@ -891,7 +957,7 @@ class N_AU_DR(NCaltech101):
         np_bbox[:, 3] = np.minimum(np_bbox[:, 3], array_height - np_bbox[:, 1])
 
         return np_bbox
-
+    
 
 class NCars(NCaltech101):
     def __init__(self, root, object_classes, height, width, nr_events_window=-1, augmentation=False, mode='training',

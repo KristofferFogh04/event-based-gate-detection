@@ -23,17 +23,19 @@ dataset:
     width: 304
     nr_events_window: 25000
   n_au_dr:
-    dataset_path: "/media/kristoffer/Elements/Datasets/N-AU-DR"
+    dataset_path: "/media/kristoffer/Kristoffer/Datasets/N-AU-DR"
     object_classes: 'all'
     height: 180
     width: 240
     nr_events_window: 10000
+    temporal_window: True
+    delta_t: 20000
 
 dir:
   log: 'log/'
 model:
   # ['fb_sparse_vgg', 'dense_vgg', 'fb_sparse_object_det', 'dense_object_det', 'sparse_firenet', 'custom_sparse_REDnetv1', 'sparse_REDnet']
-  model_name: 'sparse_firenet' #'fb_sparse_object_det'
+  model_name: 'fb_sparse_object_det' #'fb_sparse_object_det'
 optim:
   batch_size: 15
   init_lr: 1e-4

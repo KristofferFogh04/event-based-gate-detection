@@ -92,7 +92,9 @@ class AbstractTrainer(abc.ABC):
                                              self.settings.nr_events_window,
                                              augmentation=True,
                                              mode='training',
-                                             event_representation=self.settings.event_representation)
+                                             event_representation=self.settings.event_representation,
+                                             temporal_window=self.settings.temporal_window,
+                                             delta_t=self.settings.delta_t)
 
         self.nr_train_epochs = int(train_dataset.nr_samples / self.settings.batch_size) + 1
         self.nr_classes = train_dataset.nr_classes
@@ -104,7 +106,10 @@ class AbstractTrainer(abc.ABC):
                                            self.settings.width,
                                            self.settings.nr_events_window,
                                            mode='validation',
-                                           event_representation=self.settings.event_representation)
+                                           event_representation=self.settings.event_representation,
+                                           temporal_window=self.settings.temporal_window,
+                                           delta_t=self.settings.delta_t)
+        
         self.nr_val_epochs = int(val_dataset.nr_samples / self.settings.batch_size) + 1
 
         self.train_loader = self.dataset_loader(train_dataset, batch_size=self.settings.batch_size,
