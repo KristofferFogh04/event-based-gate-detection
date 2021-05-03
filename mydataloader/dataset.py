@@ -847,24 +847,27 @@ class N_AU_DR(NCaltech101):
             event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
             events = self.readEventFile(event_file, self.sequence_start[idx]+self.start,  nr_window_events=self.nr_events_window)
             """
-            events = None
-            if not self.temporal_window:
-                events = self.loader[0].load_n_events(self.nr_events_window)
-            else:
-                events = self.loader[0].load_delta_t(self.delta_t)
-                while len(events) == 0:
+            if not sum([loader.done for loader in self.loader]):
+                events = None
+                if not self.temporal_window:
+                    events = self.loader[0].load_n_events(self.nr_events_window)
+                else:
                     events = self.loader[0].load_delta_t(self.delta_t)
-                    
-            x = events['x']
-            y = events['y']
-            p = events['p'].astype('int64')
-            p[p == 0] = -1
-            t = events['t']        
-            
-            events_np = np.stack([x, y, t, p], axis=-1)        
-            
-            histogram = self.generate_input_representation(events_np, (self.height, self.width))
-            return events_np, histogram
+                    while len(events) == 0:
+                        events = self.loader[0].load_delta_t(self.delta_t)
+                        
+                x = events['x']
+                y = events['y']
+                p = events['p'].astype('int64')
+                p[p == 0] = -1
+                t = events['t']        
+                
+                events_np = np.stack([x, y, t, p], axis=-1)        
+                
+                histogram = self.generate_input_representation(events_np, (self.height, self.width))
+                return events_np, histogram
+            else:
+                return None, None
         
 
     def searchEventSequence(self, event_file, bbox_time, nr_window_events=250000):

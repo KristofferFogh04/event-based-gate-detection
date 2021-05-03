@@ -123,6 +123,9 @@ class TestObjectDet():
         for i_batch, sample_batched in enumerate(test_dataset):
 
             events, histogram = sample_batched
+            
+            if events == None:
+                break
 
             if not self.settings.temporal_window:
                 print("Getting " + str(event_window) + " events for step: " + str(counter))
