@@ -108,7 +108,9 @@ class TestObjectDet():
         dataloader = getDataloader(self.settings.dataset_name)
         test_dataset = dataloader(self.settings.dataset_path, 'all', self.settings.height,
                                         self.settings.width, augmentation=False, mode='testing',
-                                        nr_events_window=event_window, shuffle=False)
+                                        nr_events_window=event_window, shuffle=False,
+                                        temporal_window=self.settings.temporal_window,
+                                        delta_t=self.settings.delta_t)
         self.object_classes = test_dataset.object_classes
         counter = 1
         trackid = 0
@@ -120,8 +122,12 @@ class TestObjectDet():
 
         for i_batch, sample_batched in enumerate(test_dataset):
 
-            print("Getting " + str(event_window) + " events for step: " + str(counter))
             events, histogram = sample_batched
+
+            if not self.settings.temporal_window:
+                print("Getting " + str(event_window) + " events for step: " + str(counter))
+            else:
+                print("Getting " + str(self.settings.delta_t) + "microseconds worth of events, corresponding to " + str(len(events)) " events for step: " + str(counter))
 
             # Histogram for synchronous network
             histogram = torch.from_numpy(histogram[np.newaxis, :, :]).to(device)
