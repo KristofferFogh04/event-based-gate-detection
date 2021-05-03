@@ -10,6 +10,7 @@ from numpy.lib import recfunctions as rfn
 
 from mydataloader.prophesee import dat_events_tools
 from mydataloader.prophesee import npy_events_tools
+from mydataloader.prophesee.io.psee_loader import PSEELoader
 
 
 def random_shift_events(events, max_shift=20, resolution=(180, 240), bounding_box=None):
@@ -731,6 +732,12 @@ class N_AU_DR(NCaltech101):
     def createDataset(self):
         """
         Iterates over the files and stores event-windows over the entire sequence.
+        
+        """
+        self.loader = [PSEELoader(os.path.join(self.root, td_file + '_td.dat')) for td_file in self.files]
+        
+        height, width = self.loader[0].get_size()
+        
         """
         file_name_seq_id = []
         print('Building the Dataset')
@@ -751,6 +758,7 @@ class N_AU_DR(NCaltech101):
 
         pbar.close()
         self.files = file_name_seq_id
+        """
 
     def __getitem__(self, idx):
         """
@@ -835,10 +843,29 @@ class N_AU_DR(NCaltech101):
             return events, const_size_bbox.astype(np.int64), histogram
             
         else:
+            """
             event_file = os.path.join(self.root, self.files[idx][0] + '_td.dat')
             events = self.readEventFile(event_file, self.sequence_start[idx]+self.start,  nr_window_events=self.nr_events_window)
-            histogram = self.generate_input_representation(events, (self.height, self.width))
-            return events, histogram
+            """
+            events = None
+            if not self.temporal_window:
+                events = self.loader[0].load_n_events(self.nr_events_window)
+            else:
+                events = self.loader[0].load_delta_t(self.delta_t)
+                while len(events) == 0:
+                    events = self.loader[0].load_delta_t(self.delta_t)
+                    
+            x = events['x']
+            y = events['y']
+            p = events['p'].astype('int64')
+            p[p == 0] = -1
+            t = events['t']        
+            
+            events_np = np.stack([x, y, t, p], axis=-1)        
+            
+            histogram = self.generate_input_representation(events_np, (self.height, self.width))
+            return events_np, histogram
+        
 
     def searchEventSequence(self, event_file, bbox_time, nr_window_events=250000):
         """

@@ -99,7 +99,7 @@ class TestObjectDet():
         # ---- Facebook VGG ----
 
         spatial_dimensions = self.model.spatial_size
-        pth = 'log/fb_sparse_obj_det_dataset2_98/checkpoints/model_step_395.pth'
+        pth = 'log/fb_obj_det_newdataset_temporal_window_90/checkpoints/model_step_27.pth'
         self.model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
         # ---- Create Input -----
@@ -127,7 +127,7 @@ class TestObjectDet():
             if not self.settings.temporal_window:
                 print("Getting " + str(event_window) + " events for step: " + str(counter))
             else:
-                print("Getting " + str(self.settings.delta_t) + "microseconds worth of events, corresponding to " + str(len(events)) " events for step: " + str(counter))
+                print("Getting " + str(self.settings.delta_t) + " microseconds worth of events, corresponding to " + str(len(events)) + " events for step: " + str(counter))
 
             # Histogram for synchronous network
             histogram = torch.from_numpy(histogram[np.newaxis, :, :]).to(device)
