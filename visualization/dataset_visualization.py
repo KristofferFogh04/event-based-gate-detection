@@ -24,8 +24,8 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
     # open the video object for the input files
     videos = [PSEELoader(td_file) for td_file in td_files]
     # use the naming pattern to find the corresponding box file
-    box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_bbox.npy')[0]) for td_file in td_files]
-    #box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_result.npy')[0]) for td_file in td_files]
+    #box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_bbox.npy')[0]) for td_file in td_files]
+    box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_result.npy')[0]) for td_file in td_files]
     
     height, width = videos[0].get_size()
     if height == 180:
@@ -175,7 +175,7 @@ def play_files_parallel_withoutbox(td_files, labels=None, delta_t=80000, skip=0)
 
     cv2.namedWindow('SimEvents', cv2.WINDOW_NORMAL)
     print(videos[0].event_count())
-    lol = input("Press any key to start visualization")
+    #lol = input("Press any key to start visualization")
 
     # while all videos have something to read
     while not sum([video.done for video in videos]):
@@ -196,7 +196,7 @@ def play_files_parallel_withoutbox(td_files, labels=None, delta_t=80000, skip=0)
         # display the result
         cv2.imshow('SimEvents', frame)
         cv2.waitKey(1)
-        key = input("lol")
+        #key = input("lol")
 
 
 def parse_args():
@@ -206,7 +206,7 @@ def parse_args():
     parser.add_argument('records', nargs="+",
                         help='input event files, annotation files are expected to be in the same folder')
     parser.add_argument('-s', '--skip', default=0, type=int, help="skip the first n microseconds")
-    parser.add_argument('-d', '--delta_t', default=20000, type=int, help="load files by delta_t in microseconds")
+    parser.add_argument('-d', '--delta_t', default=6000, type=int, help="load files by delta_t in microseconds")
     parser.add_argument('-b', '--box', default=1, type=int, help="Whether to include bounding box file")
 
     return parser.parse_args()

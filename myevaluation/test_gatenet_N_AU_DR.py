@@ -124,7 +124,7 @@ class TestObjectDet():
 
             events, histogram = sample_batched
             
-            if events == None:
+            if isinstance(events, type(None)):
                 break
 
             if not self.settings.temporal_window:

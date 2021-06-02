@@ -23,7 +23,7 @@ dataset:
     width: 304
     nr_events_window: 25000
   n_au_dr:
-    dataset_path: "/media/kristoffer/Kristoffer/Datasets/N-AU-DR"
+    dataset_path: "/home/kristoffer/event-based-gate-detection/N-AU-DR" #"/media/kristoffer/Kristoffer/Datasets/N-AU-DR"
     object_classes: 'all'
     height: 180
     width: 240
