@@ -57,8 +57,14 @@ def getDataloader(name):
     dataset_dict = {'NCaltech101': NCaltech101,
                     'NCaltech101_ObjectDetection': NCaltech101_ObjectDetection,
                     'Prophesee': Prophesee,
-                    'NCars': NCars,
                     'N_AU_DR' : N_AU_DR}
+    return dataset_dict.get(name)
+
+def getRecurrentDataloader(name):
+    dataset_dict = {'NCaltech101': NCaltech101,
+                    'NCaltech101_ObjectDetection': NCaltech101_ObjectDetection,
+                    'Prophesee': Prophesee,
+                    'N_AU_DR' : N_AU_DR_sequential}
     return dataset_dict.get(name)
 
 
@@ -825,10 +831,22 @@ class N_AU_DR(NCaltech101):
             
             evts_hi = events[:,2].max()
             evts_lo = events[:,2].min()
+            evts_mid = ((evts_hi - evts_lo) // 2) + evts_lo
             bbox_idx = []
+            temp_bbox_idx = []
+            dist = []
+
             for i, ts in enumerate(dat_bbox['ts']):
                 if evts_lo < ts and ts < evts_hi:
-                    bbox_idx.append(i)
+                    dist.append(abs(evts_mid - ts))
+                    temp_bbox_idx.append(i)
+
+            if dist:
+                min_val = min(dist)
+                min_idx = [i for i, e in enumerate(dist) if e == min_val]
+
+                for idx in min_idx:
+                    bbox_idx.append(temp_bbox_idx[idx])
     
             bboxes = dat_bbox[bbox_idx]
     
@@ -987,13 +1005,12 @@ class N_AU_DR(NCaltech101):
         np_bbox[:, 3] = np.minimum(np_bbox[:, 3], array_height - np_bbox[:, 1])
 
         return np_bbox
-    
 
-class NCars(NCaltech101):
+class N_AU_DR_sequential(NCaltech101):
     def __init__(self, root, object_classes, height, width, nr_events_window=-1, augmentation=False, mode='training',
-                 event_representation='histogram', shuffle=True):
+                 event_representation='histogram', shuffle=True, temporal_window=False, delta_t=-1, batch_size=15):
         """
-        Creates an iterator over the N_Caltech101 dataset.
+        Creates an iterator over the Prophesee object recognition dataset.
 
         :param root: path to dataset root
         :param object_classes: list of string containing objects or 'all' for all classes
@@ -1006,27 +1023,106 @@ class NCars(NCaltech101):
         """
         if mode == 'training':
             mode = 'train'
+        elif mode == 'validation':
+            mode = 'val'
         elif mode == 'testing':
             mode = 'test'
-        if mode == 'validation':
-            mode = 'val'
-        self.root = os.path.join(root, mode)
-        self.object_classes = object_classes
+
+        file_dir = os.path.join('detection_dataset_duration_60s_ratio_1.0', mode)
+        self.files = listdir(os.path.join(root, file_dir))
+        # Remove duplicates (.npy and .dat)
+        self.files = [os.path.join(file_dir, time_seq_name[:-9]) for time_seq_name in self.files
+                  if time_seq_name[-3:] == 'npy']
+
+        self.root = root
+        self.mode = mode
         self.width = width
         self.height = height
+        self.temporal_window = temporal_window
         self.augmentation = augmentation
-        self.nr_events_window = nr_events_window
-        self.nr_classes = len(self.object_classes)
         self.event_representation = event_representation
+        self.batch_size = batch_size
+        self.nr_events_window = 250000
+        self.file_positions = None
+        self.file_idx_tracker = []
+        
+        if not self.temporal_window:
+            if nr_events_window == -1:
+                self.nr_events_window = 250000
+            else:
+                self.nr_events_window = nr_events_window
+        else:
+            if delta_t == -1:
+                self.delta_t = 20000 # microseconds
+            else:
+                self.delta_t = delta_t
 
-        self.files = listdir(self.root)
-        self.nr_samples = len(self.files)
+        self.max_nr_bbox = 15
 
-        if shuffle:
-            random.shuffle(self.files)
+        if object_classes == 'all':
+            self.nr_classes = 1
+            self.object_classes = ['Gate']
+        else:
+            self.nr_classes = len(object_classes)
+            self.object_classes = object_classes
+            
+        self.total_num_frames = 0
+        
+        for i_file, file_name in enumerate(self.files):
+            event_file = os.path.join(self.root, file_name + '_td.dat')
+            with open(event_file, "rb") as f:
+                start, v_type, ev_size, size = dat_events_tools.parse_header(f)
+            
+            num_events = dat_events_tools.count_events(event_file)
+            self.total_num_frames += num_events // self.nr_events_window
+            
+        self.nr_samples = self.total_num_frames
 
+    def createAllBBoxStreamingDataset(self):
+        """
+        Iterates over the files and stores event-windows over the entire sequence.
+        """        
+        
+        print('Building the Dataset')
+        pbar = tqdm.tqdm(total=len(self.files), unit='File', unit_scale=True)
+        self.file_positions = [[None]] * (self.total_num_frames + 100000)
+        next_start_idx = [0]*(len(self.files)+self.batch_size)
+        
+        random.shuffle(self.files)
+        
+        for i_file, file_name in enumerate(self.files):
+            
+            
+            event_file = os.path.join(self.root, file_name + '_td.dat')
+            with open(event_file, "rb") as f:
+                start, v_type, ev_size, size = dat_events_tools.parse_header(f)
+            
+            num_events = dat_events_tools.count_events(event_file)
+
+            for i in range(num_events // self.nr_events_window):
+                if self.file_positions[(i_file % self.batch_size) + i*self.batch_size + next_start_idx[i_file]][0] != None:
+                    print("Not none at: " + str(i_file) + ' index: ' + str(i))
+                self.file_positions[(i_file % self.batch_size) + i*self.batch_size + next_start_idx[i_file]] = [file_name, (i*self.nr_events_window*ev_size + start)]
+                if i == ((num_events // self.nr_events_window)-1) :
+                    next_start_idx[i_file+self.batch_size] = (i+1)*self.batch_size + next_start_idx[i_file]
+                
+            pbar.update(1)
+
+        pbar.close()
+        
+        
+    def createDataset(self):
+        """
+        Iterates over the files and stores event-windows over the entire sequence.
+        
+        """
+        self.loader = [PSEELoader(os.path.join(self.root, td_file + '_td.dat')) for td_file in self.files]
+        
+        height, width = self.loader[0].get_size()
+        
     def __len__(self):
-        return len(self.files)
+        return self.nr_samples
+        
 
     def __getitem__(self, idx):
         """
@@ -1034,24 +1130,206 @@ class NCars(NCaltech101):
         :param idx:
         :return: x,y,t,p,  label
         """
-        label = np.loadtxt(os.path.join(self.root, self.files[idx], 'is_car.txt')).astype(np.int64)
-        events = np.loadtxt(os.path.join(self.root, self.files[idx], 'events.txt'), dtype=np.float32)
-        events[events[:, -1] == 0, -1] = -1
-        nr_events = events.shape[0]
+        if idx == 0:
+            self.createAllBBoxStreamingDataset()
+        
+        reset_flag = 0
+        if (self.mode == 'train' or self.mode == 'val'):
+            
+            # First read the events
+            if self.file_positions[idx][0] is not None:
+                event_file = os.path.join(self.root, self.file_positions[idx][0] + '_td.dat')
+                
+                if self.file_positions[idx][1] < 1000:
+                    reset_flag = 1
+                events = self.readEventFile(event_file, self.file_positions[idx][1], nr_window_events=self.nr_events_window)
+                
+                histogram = self.generate_input_representation(events, (self.height, self.width))
+                
+                # Then read the bounding boxes. If bounding box is included in event timestamps, take it
+                bbox_file = os.path.join(self.root, self.file_positions[idx][0] + '_bbox.npy')
+                
+                f_bbox = open(bbox_file, "rb")
+                # dat_bbox types (v_type):
+                # [('ts', 'uint64'), ('x', 'float32'), ('y', 'float32'), ('w', 'float32'), ('h', 'float32'), (
+                # 'class_id', 'uint8'), ('confidence', 'float32'), ('track_id', 'uint32')]
+                start, v_type, ev_size, size = npy_events_tools.parse_header(f_bbox)
+                dat_bbox = np.fromfile(f_bbox, dtype=v_type, count=-1)
+                f_bbox.close()
+                
+                evts_hi = events[:,2].max()
+                evts_lo = events[:,2].min()
+                evts_mid = ((evts_hi - evts_lo) // 2 ) + evts_lo
+                bbox_idx = []
+                temp_bbox_idx = []
+                dist = []
+                
+                for i, ts in enumerate(dat_bbox['ts']):
+                    if evts_lo < ts and ts < evts_hi:
+                        dist.append(abs(evts_mid - ts))
+                        temp_bbox_idx.append(i)
+                        
+                if dist:
+                    min_val = min(dist)
+                    min_idx = [i for i, e in enumerate(dist) if e == min_val]
+        
+                    for idx in min_idx:
+                        bbox_idx.append(temp_bbox_idx[idx])
+                    
+                bboxes = dat_bbox[bbox_idx]
+        
+                # Required Information ['x', 'y', 'w', 'h', 'class_id']
+                np_bbox = rfn.structured_to_unstructured(bboxes)[:, [1, 2, 3, 4, 5]]
+                np_bbox = self.cropToFrame(np_bbox)
+        
+                const_size_bbox = np.zeros([self.max_nr_bbox, 5])
+                const_size_bbox[:np_bbox.shape[0], :] = np_bbox
+    
+                # Events
+                return events, const_size_bbox.astype(np.int64), histogram, reset_flag
+            else:
+                return np.zeros([10000,4]), np.zeros([15,5]).astype(np.int64), np.zeros([180,240,2]).astype(np.float32), 2
+            
+        else:
 
-        window_start = 0
-        window_end = nr_events
-        if self.augmentation:
-            events = random_shift_events(events, max_shift=10,resolution=(self.height, self.width))
-            events = random_flip_events_along_x(events, resolution=(self.height, self.width))
-            window_start = random.randrange(0, max(1, nr_events - self.nr_events_window))
+            if not sum([loader.done for loader in self.loader]):
+                events = None
+                if not self.temporal_window:
+                    events = self.loader[0].load_n_events(self.nr_events_window)
+                else:
+                    events = self.loader[0].load_delta_t(self.delta_t)
+                    while len(events) == 0:
+                        events = self.loader[0].load_delta_t(self.delta_t)
+                        
+                x = events['x']
+                y = events['y']
+                p = events['p'].astype('int64')
+                p[p == 0] = -1
+                t = events['t']        
+                
+                events_np = np.stack([x, y, t, p], axis=-1)        
+                
+                histogram = self.generate_input_representation(events_np, (self.height, self.width))
+                return events_np, histogram
+            else:
+                return None, None
+        
 
-        if self.nr_events_window != -1:
-            # Catch case if number of events in batch is lower than number of events in window.
-            window_end = min(nr_events, window_start + self.nr_events_window)
+    def searchEventSequence(self, event_file, bbox_time, nr_window_events=250000):
+        """
+        Code adapted from:
+        https://github.com/prophesee-ai/prophesee-automotive-dataset-toolbox/blob/master/src/io/psee_loader.py
 
-        events = events[window_start:window_end, :]
+        go to the time final_time inside the file. This is implemented using a binary search algorithm
+        :param final_time: expected time
+        :param term_cirterion: (nb event) binary search termination criterion
+        it will load those events in a buffer and do a numpy searchsorted so the result is always exact
+        """
+        term_criterion = nr_window_events // 2
+        nr_events = dat_events_tools.count_events(event_file)
+        file_handle = open(event_file, "rb")
+        ev_start, ev_type, ev_size, img_size = dat_events_tools.parse_header(file_handle)
+        low = 0
+        high = nr_events
 
-        histogram = self.generate_input_representation(events, (self.height, self.width))
+        # binary search
+        while high - low > term_criterion:
+            middle = (low + high) // 2
 
-        return events, label, histogram
+            # self.seek_event(file_handle, middle)
+            file_handle.seek(ev_start + middle * ev_size)
+            mid = np.fromfile(file_handle, dtype=[('ts', 'u4'), ('_', 'i4')], count=1)["ts"][0]
+
+            if mid > bbox_time:
+                high = middle
+            elif mid < bbox_time:
+                low = middle + 1
+            else:
+                file_handle.seek(ev_start + (middle - (term_criterion // 2) * ev_size))
+                break
+
+        file_handle.close()
+        # we now know that it is between low and high
+        return ev_start + low * ev_size
+
+    def readEventFile(self, event_file, file_position, nr_window_events=250000):
+        file_handle = open(event_file, "rb")
+        # file_position = ev_start + low * ev_size
+        file_handle.seek(file_position)
+        dat_event = np.fromfile(file_handle, dtype=[('ts', 'u4'), ('_', 'i4')], count=nr_window_events)
+        file_handle.close()
+
+        x = np.bitwise_and(dat_event["_"], 16383)
+        y = np.right_shift(
+            np.bitwise_and(dat_event["_"], 268419072), 14)
+        p = np.right_shift(np.bitwise_and(dat_event["_"], 268435456), 28)
+        p[p == 0] = -1
+        events_np = np.stack([x, y, dat_event['ts'], p], axis=-1)
+
+        return events_np
+    
+    def load_delta_t(self, event_file, sequence_start, t_start, delta_t):
+
+        if delta_t < 1:
+            raise ValueError("load_delta_t(): delta_t must be at least 1 micro-second: {}".format(delta_t))
+
+        file_handle = open(event_file, "rb")
+        ev_start, ev_type, ev_size, img_size = dat_events_tools.parse_header(file_handle)
+        file_handle.seek(0, os.SEEK_END)
+        _end = file_handle.tell()
+        
+        file_handle.seek(sequence_start)    
+        final_time = t_start + delta_t
+        tmp_time = t_start
+        start = file_handle.tell()
+        pos = start
+        nevs = 0
+        batch = 100
+        first = True
+        
+        # data is read by buffers until enough events are read or until the end of the file
+        while tmp_time < final_time and pos < _end:
+            count = (min(_end, pos + batch * ev_size) - pos) // ev_size
+            buffer = np.fromfile(file_handle, dtype=[('ts', 'u4'), ('_', 'i4')], count=count)
+            tmp_time = buffer[-1][0]
+                   
+            x = np.bitwise_and(buffer["_"], 16383)
+            y = np.right_shift(
+                np.bitwise_and(buffer["_"], 268419072), 14)
+            p = np.right_shift(np.bitwise_and(buffer["_"], 268435456), 28)
+            p[p == 0] = -1
+            events_np = np.stack([x, y, buffer['ts'], p], axis=-1)
+            if first:
+                event_buffer = events_np
+                first = False
+            else:
+                event_buffer = np.append(event_buffer, events_np, axis=0)
+            
+            nevs += count
+            pos = file_handle.tell()
+        if tmp_time >= final_time:
+            current_time = final_time
+        else:
+            current_time = tmp_time + 1
+        assert len(event_buffer) > 0
+        
+        #idx = np.searchsorted(event_buffer[-1]['t'], final_time)
+        #event_buffer[-1] = event_buffer[-1][:idx]
+        #event_buffer = np.concatenate(event_buffer)
+        #idx = len(event_buffer)
+        return event_buffer
+
+    def cropToFrame(self, np_bbox):
+        """Checks if bounding boxes are inside frame. If not crop to border"""
+        array_width = np.ones_like(np_bbox[:, 0]) * self.width - 1
+        array_height = np.ones_like(np_bbox[:, 1]) * self.height - 1
+
+        np_bbox[:, :2] = np.maximum(np_bbox[:, :2], np.zeros_like(np_bbox[:, :2]))
+        np_bbox[:, 0] = np.minimum(np_bbox[:, 0], array_width)
+        np_bbox[:, 1] = np.minimum(np_bbox[:, 1], array_height)
+
+        np_bbox[:, 2] = np.minimum(np_bbox[:, 2], array_width - np_bbox[:, 0])
+        np_bbox[:, 3] = np.minimum(np_bbox[:, 3], array_height - np_bbox[:, 1])
+
+        return np_bbox
+    

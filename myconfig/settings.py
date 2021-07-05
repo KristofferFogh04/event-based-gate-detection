@@ -43,6 +43,8 @@ class Settings:
 
             self.dataset_path = dataset_specs['dataset_path']
             assert os.path.isdir(self.dataset_path)
+            self.test_dataset_path = dataset_specs['test_dataset_path']
+            assert os.path.isdir(self.test_dataset_path)
             self.object_classes = dataset_specs['object_classes']
             self.height = dataset_specs['height']
             self.width = dataset_specs['width']

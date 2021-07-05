@@ -79,7 +79,6 @@ class ConvGRU(nn.Module):
         else:
             none_prev = False
             dense_prev = self.sparse_to_dense(prev_state)
-            
         stacked_dense_inputs = torch.cat([dense_input, dense_prev], dim=1)
         stacked_inputs = self.dense_to_sparse(stacked_dense_inputs)
 
