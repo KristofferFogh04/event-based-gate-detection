@@ -79,6 +79,7 @@ class AbstractTrainer(abc.ABC):
         self.training_accuracy = 0
         self.validation_accuracy = 0
         self.max_validation_accuracy = 0
+        self.max_test_accuracy = 0
         self.val_confusion_matrix = np.zeros([self.nr_classes, self.nr_classes])
 
         # tqdm progress bar
@@ -671,15 +672,8 @@ class SparseObjectDetModel(AbstractTrainer):
 class SparseRecurrentObjectDetModel(AbstractTrainer):
     def buildModel(self):
         """Creates the specified model"""
-        if self.settings.model_name == 'sparse_REDnet':
-            self.model = REDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
 
-        elif self.settings.model_name == 'custom_sparse_REDnetv1':
-            self.model = customREDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
-
-        elif self.settings.model_name == 'sparse_firenet':
+        if self.settings.model_name == 'sparse_firenet':
             self.model = FirenetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'N_AU_DR'),
                                        freeze_layers=True)
@@ -691,12 +685,7 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                                              self.settings.dataset_name == 'Prophesee' or
                                              self.settings.dataset_name == 'N_AU_DR'):
             self.loadPretrainedWeights()
-            
-        # Variables for Truncated Backpropagation Through Time
-        self.TBPTT = False
-        self.k1 = 10
-        self.k2 = 20
-        self.retain_graph = self.k1 < self.k2
+        
 
     def loadPretrainedWeights(self):
         """Loads pretrained model weights"""
@@ -719,179 +708,20 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
         validation_step = 50 - 48 * (self.settings.dataset_name == 'Prophesee' or self.settings.dataset_name == 'N_AU_DR')
 
         while self.epoch_step < 1500:
-            #self.trainEpoch()
-            self.altTrain()
+
+            self.trainEpoch()
             self.validationEpoch()
             self.testEpoch()
 
             self.epoch_step += 1
             self.scheduler.step(self.validation_accuracy)
 
+
     def trainEpoch(self):
         self.pbar = tqdm.tqdm(total=self.nr_train_epochs, unit='Batch', unit_scale=True)
         self.model = self.model.train()
-        output_prop = False
-        jump_flag = False
-        num_jumps = 0
         loss_function = yoloLoss
         prev_states = None
-        states = [(None, None)]
-        outputs = []
-        targets = []
-        for i_batch, sample_batched in enumerate(self.train_loader):
-            event, bounding_box, histogram = sample_batched
-            if histogram.shape[0] < self.settings.batch_size:
-                prev_states = None
-                continue
-            elif (torch.max(event[:,2]) - torch.min(event[:,2])) > 50000000:
-                prev_states = None
-                continue
-
-            # Change size to input size of sparse VGG
-            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2),
-                                                        torch.Size(self.model_input_size))
-            histogram = histogram.permute(0, 2, 3, 1)
-            # Change x, width and y, height
-            bounding_box[:, :, [0, 2]] = (bounding_box[:, :, [0, 2]] * self.model_input_size[1].float()
-                                       / self.settings.width).long()
-            bounding_box[:, :, [1, 3]] = (bounding_box[:, :, [1, 3]] * self.model_input_size[0].float()
-                                       / self.settings.height).long()
-            locations, features = self.denseToSparse(histogram)
-
-            # No Truncated BackProp Through Time      
-            if self.TBPTT == False:
-                self.optimizer.zero_grad()
-                if prev_states == None:
-                    model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
-                else:
-                    model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states.detach())
-                prev_states = new_states
-                
-                if np.count_nonzero(bounding_box.cpu().numpy()) != 0:
-                    out = loss_function(model_output, bounding_box, self.model_input_size)
-                    loss = out[0]
-    
-                    # Write losses statistics
-                    self.storeLossesObjectDetection(out)
-    
-                    loss.backward(retain_graph=True)
-                    self.optimizer.step()
-                    self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
-                self.pbar.update(1)
-            
-            # Using Truncated Backprop Through Time with multiple output backprop
-            elif self.TBPTT and output_prop:
-                if states[-1][1] is not None:
-                    state = [states[-1][1][0].detach(), states[-1][1][1].detach()]
-                    state[0].features.requires_grad = True
-                    state[1].features.requires_grad = True
-                else:
-                    state = states[-1][1]
-                
-                model_output, new_state = self.model([locations, features, histogram.shape[0]], state)
-                outputs.append(model_output)
-                states.append((state, new_state))
-                targets.append(bounding_box)
-                
-                while len(states) > self.k2:
-                    del states[0]
-                    del outputs[0]
-                    del targets[0]
-                
-                if (i_batch + 1) % self.k1 == 0:
-                    #out = loss_function(model_output, bounding_box, self.model_input_size)
-                    #loss = out[0]
-                    
-                    # Write losses statistics
-                    #self.storeLossesObjectDetection(out)
-                    
-                    self.optimizer.zero_grad()
-                    
-                    #loss.backward(retain_graph=self.retain_graph)
-                    for i in range(self.k2-1):
-                        if states[-i-2][0] is None:
-                            break
-                        if i < self.k1:
-                            out = loss_function(outputs[-i-1], targets[-i-1], self.model_input_size)
-                            loss = out[0]
-                            loss.backward(retain_graph=self.retain_graph)
-                        curr_grad = [None] * 2
-                        curr_grad[0] = states[-i-1][0][0].features.grad
-                        curr_grad[1] = states[-i-1][0][1].features.grad
-                        states[-i-2][1][0].features.backward(curr_grad[0], retain_graph=self.retain_graph)
-                        states[-i-2][1][1].features.backward(curr_grad[1], retain_graph=self.retain_graph)
-                    self.optimizer.step()
-                    
-                    self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
-                    self.pbar.update(1*self.k1)
-            # Standard Truncated Backprop Through Tume        
-            else:
-                if states[-1][1] is not None:
-                    state = states[-1][1].detach()
-                    state.features.requires_grad = True
-                else:
-                    state = states[-1][1]
-                
-                model_output, new_state = self.model([locations, features, histogram.shape[0]], state)
-                states.append((state, new_state))
-                
-                while len(states) > self.k2:
-                    del states[0]
-                
-                if np.count_nonzero(bounding_box.cpu().numpy()) > 0:
-
-                    out = loss_function(model_output, bounding_box, self.model_input_size)
-                    loss = out[0]
-                    
-                    # Write losses statistics
-                    self.storeLossesObjectDetection(out)
-                    
-                    self.optimizer.zero_grad()
-                    
-                    loss.backward(retain_graph=self.retain_graph)
-                    for i in range(self.k2-1):
-                        if states[-i-2][0] is None:
-                            break
-                        curr_grad = states[-i-1][0].features.grad
-                        states[-i-2][1].features.backward(curr_grad, retain_graph=self.retain_graph)
-                    self.optimizer.step()
-                    self.pbar.set_postfix(TrainLoss=loss.data.cpu().numpy())
-                self.pbar.update(1)
-
-
-            if self.batch_step % (self.nr_train_epochs * 5) == 0:
-                batch_one_mask = locations[:, -1] == 0
-                vis_locations = locations[batch_one_mask, :2]
-                features = features[batch_one_mask, :]
-
-                with torch.no_grad():
-                    detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
-                                               threshold=yolo_thresh).long().cpu().numpy()
-                    detected_bbox = detected_bbox[detected_bbox[:, 0] == 0, 1:-2]
-
-
-                image = visualizations.visualizeLocations(vis_locations.cpu().int().numpy(), self.model_input_size,
-                                                          features=features.cpu().numpy(),
-                                                          bounding_box=bounding_box[0, :, :].cpu().numpy(),
-                                                          class_name=[self.object_classes[i]
-                                                                      for i in bounding_box[0, :, -1]])
-                image = visualizations.drawBoundingBoxes(image, detected_bbox[:, :-1],
-                                                         class_name=[self.object_classes[i]
-                                                                     for i in detected_bbox[:, -1]],
-                                                         ground_truth=False, rescale_image=False)
-                self.writer.add_image('Training/Input Histogram', image, self.epoch_step, dataformats='HWC')
-            self.batch_step += 1
-
-        self.writer.add_scalar('Training/Learning_Rate', self.getLearningRate(), self.epoch_step)
-        self.pbar.close()
-
-
-    def altTrain(self):
-        self.pbar = tqdm.tqdm(total=self.nr_train_epochs, unit='Batch', unit_scale=True)
-        self.model = self.model.train()
-        loss_function = yoloLoss
-        prev_states = None
-        detached = True
         sequence_length = 10
         counter = 0
         for i_batch, sample_batched in enumerate(self.train_loader):
@@ -1107,6 +937,11 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
         self.validation_loss = self.validation_loss / float(self.val_batch_step)
         self.saveValidationStatisticsObjectDetection()
         print("TestAcc: " + str(self.validation_accuracy))
+
+
+        if self.max_test_accuracy < self.validation_accuracy:
+            self.max_test_accuracy = self.validation_accuracy
+            self.saveCheckpoint()
         self.pbar.close()
 
 
