@@ -23,19 +23,20 @@ dataset:
     width: 304
     nr_events_window: 25000
   n_au_dr:
-    dataset_path: "/home/kristoffer/event-based-gate-detection/N-AU-DR" #"/media/kristoffer/Kristoffer/Datasets/N-AU-DR"
+    dataset_path: "/media/kristoffer/Kristoffer/Datasets/N-AU-DR_combined_hifreq" #"/home/kristoffer/event-based-gate-detection/N-AU-DR" 
     object_classes: 'all'
     height: 180
     width: 240
     nr_events_window: 10000
-    temporal_window: True
+    temporal_window: False
     delta_t: 20000
 
 dir:
   log: 'log/'
 model:
   # ['fb_sparse_vgg', 'dense_vgg', 'fb_sparse_object_det', 'dense_object_det', 'sparse_firenet', 'custom_sparse_REDnetv1', 'sparse_REDnet']
-  model_name: 'fb_sparse_object_det' #'fb_sparse_object_det'
+  model_name: 'sparse_firenet' #'fb_sparse_object_det'
+  #model_name: 'fb_sparse_object_det'
 optim:
   batch_size: 15
   init_lr: 1e-4
@@ -49,8 +50,10 @@ checkpoint:
   # the same dataset
   use_pretrained: False
   pretrained_dense_vgg: ''
-  pretrained_sparse_vgg: 'log/trained-NCaltech/checkpoints/model_step_25.pth'
+  #pretrained_sparse_vgg: 'log/fb_sparse_obj_det_run3_97/checkpoints/model_step_125.pth'
+  #pretrained_sparse_vgg: 'log/RNN_TBPTT_trained_run4_93/checkpoints/model_step_15.pth'
+  pretrained_sparse_vgg: 'log/RNN_TBPTT_trained_run5_manyepochs_93/checkpoints/model_step_39.pth' 
 hardware:
   # num_cpu_workers: {-1: auto, 0: main thread, >0: ...}
-  num_cpu_workers: -1
+  num_cpu_workers: 0
   gpu_device: 'cpu'  # [0 or 'cpu']

@@ -61,7 +61,7 @@ class TestObjectDet():
         self.multi_processing = args.use_multiprocessing
         self.compute_active_sites = args.compute_active_sites
         self.asyn = args.asyn
-        self.yolo_thresh = 0.71
+        self.yolo_thresh = 0.3
 
         self.nr_classes = 1
         self.nr_input_channels = 2
@@ -99,7 +99,7 @@ class TestObjectDet():
         # ---- Facebook VGG ----
 
         spatial_dimensions = self.model.spatial_size
-        pth = 'log/fb_obj_det_newdataset_temporal_window_90/checkpoints/model_step_27.pth'
+        pth = 'log/fb_sparse_obj_det_run3_97/checkpoints/model_step_125.pth'
         self.model.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
 
         # ---- Create Input -----
@@ -150,7 +150,7 @@ class TestObjectDet():
             detected_bbox = yoloDetect(output, self.model_input_size.to(output.device),
                    threshold=self.yolo_thresh)
 
-            detected_bbox = nonMaxSuppression(detected_bbox, iou=0.3)
+            detected_bbox = nonMaxSuppression(detected_bbox, iou=0.1)
             detected_bbox_long = detected_bbox.long().cpu().numpy()
 
             # Organizing bounding boxes for saving to npy
@@ -209,6 +209,9 @@ class TestObjectDet():
             print("Getting " + str(event_window) + " events for step: " + str(counter))
             events, histogram = sample_batched
 
+            if isinstance(events, type(None)):
+                break
+
             # Histogram for synchronous network
             histogram = torch.from_numpy(histogram[np.newaxis, :, :])
             histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(spatial_dimensions))
@@ -231,7 +234,7 @@ class TestObjectDet():
             detected_bbox = yoloDetect(output, self.model_input_size.to(output.device),
                    threshold=self.yolo_thresh)
 
-            detected_bbox = nonMaxSuppression(detected_bbox, iou=0.3)
+            detected_bbox = nonMaxSuppression(detected_bbox, iou=0.1)
             detected_bbox_long = detected_bbox.long().cpu().numpy()
 
             # Organizing bounding boxes for saving to npy
@@ -383,7 +386,7 @@ class TestObjectDet():
                     asyn_output = asyn_output1[1].view([-1] + [6,8] + [(self.nr_classes + 5*self.nr_input_channels)])
                     asyn_detected_bbox = yoloDetect(asyn_output.float(), self.model_input_size.to(asyn_output.device),
                            threshold=0.3)
-                    asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.6)
+                    asyn_detected_bbox = nonMaxSuppression(asyn_detected_bbox, iou=0.3)
                     asyn_detected_bbox = asyn_detected_bbox.long().cpu().numpy()
 
             counter += 1
@@ -415,7 +418,7 @@ def main():
     settings = Settings(settings_filepath, generate_log=False)
 
     tester = TestObjectDet(args, settings, save_dir)
-    tester.testSparse()
+    tester.testSparseRecurrent()
 
 
 if __name__ == "__main__":

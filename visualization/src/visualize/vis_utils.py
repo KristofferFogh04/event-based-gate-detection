@@ -26,12 +26,14 @@ def make_binary_histo(events, img=None, width=304, height=240):
         img = 127 * np.ones((height, width, 3), dtype=np.uint8)
     else:
         # if an array was already allocated just paint it grey
-        img[...] = 127
+        img[...] = 255
     if events.size:
         assert events['x'].max() < width, "out of bound events: x = {}, w = {}".format(events['x'].max(), width)
         assert events['y'].max() < height, "out of bound events: y = {}, h = {}".format(events['y'].max(), height)
 
-        img[events['y'], events['x'], :] = 255 * events['p'][:, None]
+        img[events['y'], events['x'], :] = 0
+        img[events['y'], events['x'], 0] = 255 * events['p']
+        img[events['y'], events['x'], 2] = events['p'] -1
     return img
 
 

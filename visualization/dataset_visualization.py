@@ -24,8 +24,8 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
     # open the video object for the input files
     videos = [PSEELoader(td_file) for td_file in td_files]
     # use the naming pattern to find the corresponding box file
-    #box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_bbox.npy')[0]) for td_file in td_files]
-    box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_result.npy')[0]) for td_file in td_files]
+    box_videos1 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_bbox.npy')[0]) for td_file in td_files]
+    #box_videos2 = [PSEELoader(glob(td_file.split('_td.dat')[0] +  '*_resultRNN.npy')[0]) for td_file in td_files]
     
     height, width = videos[0].get_size()
     if height == 180:
@@ -108,12 +108,13 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
             else:
                 last_boxes = boxes.copy()
                 ts_last_box = ts
-            if ts - ts_last_box > 200000:
+            if ts - ts_last_box > 50000:
                 last_boxes = np.empty((0,))
 
 
         # display the result
-        key = input("lol")
+        print(ts/1e6)
+        #key = input("lol")
         cv2.imshow('Ground Truth', frame)
         cv2.waitKey(1)
 
@@ -132,7 +133,7 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
 
         # load events and boxes from all files
         events = [video.load_delta_t(delta_t) for video in videos]
-        box_events = [box_video.load_delta_t(delta_t) for box_video in box_videos2]
+        box_events = [box_video.load_n_events(10000) for box_video in box_videos2]
         for index, (evs, boxes) in enumerate(zip(events, box_events)):
             y, x = divmod(index, size_x)
 
@@ -145,7 +146,8 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
             vis.draw_bboxes(im, boxes, labelmap=labelmap)
 
             if len(boxes) == 0:
-                vis.draw_bboxes(im, last_boxes, labelmap=labelmap)
+                pass
+                #vis.draw_bboxes(im, last_boxes, labelmap=labelmap)
             else:
                 last_boxes = boxes.copy()
                 ts_last_box = ts
@@ -206,7 +208,7 @@ def parse_args():
     parser.add_argument('records', nargs="+",
                         help='input event files, annotation files are expected to be in the same folder')
     parser.add_argument('-s', '--skip', default=0, type=int, help="skip the first n microseconds")
-    parser.add_argument('-d', '--delta_t', default=6000, type=int, help="load files by delta_t in microseconds")
+    parser.add_argument('-d', '--delta_t', default=10000, type=int, help="load files by delta_t in microseconds")
     parser.add_argument('-b', '--box', default=1, type=int, help="Whether to include bounding box file")
 
     return parser.parse_args()
