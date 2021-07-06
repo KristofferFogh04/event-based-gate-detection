@@ -19,10 +19,6 @@ from quaternion_utils import Quaternion
 
 
 class GateBoundingBoxAnnotation:
-    """ Annotate gates for training using back projection
-
-        This class is a converter to 3D coordinates of gates to 2D pixel coordinates.
-    """
 
     def __init__(self):
 
