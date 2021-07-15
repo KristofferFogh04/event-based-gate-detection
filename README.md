@@ -1,6 +1,10 @@
 # event-based-gate-detection
 
-This is the code for the master thesis titled xxx
+This is the code for the master thesis titled Event-based Gate Detection
+
+This repository is largely based on the repository rpg_asynet published by uzh-rpg:
+https://github.com/uzh-rpg/rpg_asynet
+
 
 ## Installation
 First set up an [Anaconda](https://www.anaconda.com/) environment:
