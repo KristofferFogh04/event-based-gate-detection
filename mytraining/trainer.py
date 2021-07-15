@@ -12,10 +12,7 @@ from mydataloader.loader import Loader
 from mymodels.sparse_gatenet import SparseVGGGateNet
 from mymodels.facebook_sparse_object_det import FBSparseObjectDet
 from mymodels.facebook_sparse_vgg import FBSparseVGG
-from mymodels.REDnet_sparse_object_det import REDnetSparseObjectDet
-from mymodels.custom_REDnetv1_sparse_object_det import customREDnetSparseObjectDet
-from mymodels.firenet_sparse_object_det import FirenetSparseObjectDet
-from mymodels.firenet_sparse_object_det_v2 import FirenetSparseObjectDetV2
+from mymodels.sparse_RNN_object_det import SparseRNNObjectDet
 from mymodels.yolo_loss import yoloLoss
 from mymodels.yolo_detection import yoloDetect
 from mymodels.yolo_detection import nonMaxSuppression
@@ -48,7 +45,7 @@ class AbstractTrainer(abc.ABC):
             self.nr_input_channels = 30
 
         self.writer = SummaryWriter(self.settings.ckpt_dir)
-        if self.settings.model_name == 'sparse_firenet':
+        if self.settings.model_name == 'sparse_RNN':
             self.dataset_builder = dataset.getRecurrentDataloader(self.settings.dataset_name)
             self.dataset_loader = Loader
             self.test_dataset_builder = dataset.getDataloader(self.settings.dataset_name)
@@ -442,9 +439,8 @@ class SparseObjectDetModel(AbstractTrainer):
     def buildModel(self):
         """Creates the specified model"""
         if self.settings.model_name == 'fb_sparse_object_det':
-            self.model = FirenetSparseObjectDetV2(self.nr_classes, nr_input_channels=self.nr_input_channels)
-            #self.model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-            #                           small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
+            self.model = FBSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
         else:
             raise ValueError("Wrong model specified")
 
@@ -673,8 +669,8 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
     def buildModel(self):
         """Creates the specified model"""
 
-        if self.settings.model_name == 'sparse_firenet':
-            self.model = FirenetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
+        if self.settings.model_name == 'sparse_RNN':
+            self.model = SparseRNNObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'N_AU_DR'),
                                        freeze_layers=True)
 

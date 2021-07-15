@@ -349,7 +349,7 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
     def buildModel(self):
         """Creates the specified model"""
 
-        if self.settings.model_name == 'sparse_firenet':
+        if self.settings.model_name == 'sparse_RNN':
             self.model = FirenetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'N_AU_DR'),
                                        freeze_layers=True)
