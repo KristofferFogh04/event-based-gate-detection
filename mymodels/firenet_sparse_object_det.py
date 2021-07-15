@@ -115,15 +115,15 @@ class FirenetSparseObjectDet(nn.Module):
         self.linear_1 = nn.Linear(self.linear_input_features, 1024)
         self.linear_2 = nn.Linear(1024, spatial_size_product*(nr_classes + 5*self.nr_box))
         
-        if freeze_layers == True:
+        #if freeze_layers == True:
             # Load convolutional layers of model
-            pth = 'log/RNN_shouldbeperfect/checkpoints/model_step_2.pth'
-            self.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
+        #    pth = 'log/RNN_sequential_combineddataset_98val_15test/checkpoints/model_step_17.pth'
+        #    self.load_state_dict(torch.load(pth, map_location={'cuda:0': 'cpu'})['state_dict'])
             
             # Freeze convolutional and linear layers
-            for child in self.sparseModel.children():
-                for param in child.parameters():
-                    param.requires_grad = False
+        #    for child in self.sparseModel.children():
+        #        for param in child.parameters():
+        #            param.requires_grad = False
             #for child in self.linear_1.children():
             #    for param in child.parameters():
             #        param.requires_grad = False

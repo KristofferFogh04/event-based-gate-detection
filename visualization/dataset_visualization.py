@@ -104,6 +104,7 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
             vis.draw_bboxes(im, boxes, labelmap=labelmap)
 
             if len(boxes) == 0:
+                pass
                 vis.draw_bboxes(im, last_boxes, labelmap=labelmap)
             else:
                 last_boxes = boxes.copy()
@@ -113,7 +114,6 @@ def play_files_parallel_withbox(td_files, labels=None, delta_t=80000, skip=0):
 
 
         # display the result
-        print(ts/1e6)
         #key = input("lol")
         cv2.imshow('Ground Truth', frame)
         cv2.waitKey(1)
@@ -177,7 +177,7 @@ def play_files_parallel_withoutbox(td_files, labels=None, delta_t=80000, skip=0)
 
     cv2.namedWindow('SimEvents', cv2.WINDOW_NORMAL)
     print(videos[0].event_count())
-    #lol = input("Press any key to start visualization")
+    lol = input("Press any key to start visualization")
 
     # while all videos have something to read
     while not sum([video.done for video in videos]):
@@ -198,7 +198,7 @@ def play_files_parallel_withoutbox(td_files, labels=None, delta_t=80000, skip=0)
         # display the result
         cv2.imshow('SimEvents', frame)
         cv2.waitKey(1)
-        #key = input("lol")
+        key = input("lol")
 
 
 def parse_args():
@@ -208,7 +208,7 @@ def parse_args():
     parser.add_argument('records', nargs="+",
                         help='input event files, annotation files are expected to be in the same folder')
     parser.add_argument('-s', '--skip', default=0, type=int, help="skip the first n microseconds")
-    parser.add_argument('-d', '--delta_t', default=10000, type=int, help="load files by delta_t in microseconds")
+    parser.add_argument('-d', '--delta_t', default=15000, type=int, help="load files by delta_t in microseconds")
     parser.add_argument('-b', '--box', default=1, type=int, help="Whether to include bounding box file")
 
     return parser.parse_args()

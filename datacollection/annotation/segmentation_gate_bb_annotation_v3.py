@@ -28,6 +28,12 @@ class GateBoundingBoxAnnotation:
 
         self.resolution = [240, 180]
         self.trackid = 0
+        cv2.namedWindow('Keypoints',cv2.WINDOW_NORMAL)
+        cv2.namedWindow('bb_image',cv2.WINDOW_NORMAL)
+        cv2.namedWindow('debug_image',cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('Keypoints', 480, 360)
+        cv2.resizeWindow('bb_image', 480, 360)
+        cv2.resizeWindow('debug_image', 480, 360)
 
     def computeBoundingBox(self, seg_image):
 
@@ -62,8 +68,6 @@ class GateBoundingBoxAnnotation:
         
         im_with_keypoints = cv2.drawKeypoints(seg_image, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         cv2.imshow("Keypoints", im_with_keypoints)
-        
-        cv2.imshow("debug_image", seg_image)
         cv2.waitKey(10)
         
         results = []
@@ -201,6 +205,10 @@ class GateBoundingBoxAnnotation:
             else:
                 #h = bottom_outer_edge - top_outer_edge
                 h = len(seg_image)-1 - y
+            
+            debug_img1 = cv2.rectangle(np.copy(seg_image), (x,y), (x+w, y+h), (255, 0, 0), 2)
+            cv2.imshow("debug_image", debug_img1)
+            cv2.waitKey(10)
             
             # Now refine the box
             done = False             

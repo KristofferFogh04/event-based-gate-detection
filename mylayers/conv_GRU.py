@@ -73,8 +73,11 @@ class ConvGRU(nn.Module):
         if prev_state is None:
             none_prev = True
             state_size = [batch_size, self.hidden_size] + list(spatial_size)
-            #dense_prev = torch.zeros(state_size, device='cpu')
-            dense_prev = torch.zeros(state_size, device='cuda:0')
+            if torch.cuda.is_available():
+                dense_prev = torch.zeros(state_size, device='cuda:0')
+            else:
+                dense_prev = torch.zeros(state_size, device='cpu')
+            
             prev_state = self.dense_to_sparse(dense_prev)
         else:
             none_prev = False

@@ -47,23 +47,10 @@ class AbstractTrainer(abc.ABC):
             self.nr_input_channels = 30
 
         self.dataset_builder = dataset.getDataloader(self.settings.dataset_name)
-        self.dataset_loader = Loader
 
-        self.writer = SummaryWriter(self.settings.ckpt_dir)
-        if self.settings.model_name == 'sparse_firenet':
-            self.createRecurrentDatasets()
-        else:
-            self.createDatasets()
+        self.createDatasets()
 
         self.buildModel()
-        self.optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),
-                                    lr=self.settings.init_lr)
-
-        if settings.steps_lr is not None:
-            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=settings.steps_lr,
-                                                                  gamma=settings.factor_lr)
-        if settings.resume_training:
-            self.loadCheckpoint(self.settings.resume_ckpt_file)
 
         self.batch_step = 0
         self.epoch_step = 0
@@ -83,36 +70,13 @@ class AbstractTrainer(abc.ABC):
         """Model is constructed in child class"""
         pass
 
+        
     def createDatasets(self):
         """
         Creates the validation and the training data based on the lists specified in the config/settings.yaml file.
         """
-        test_dataset = self.dataset_builder(self.settings.dataset_path,
-                                             self.settings.object_classes,
-                                             self.settings.height,
-                                             self.settings.width,
-                                             self.settings.nr_events_window,
-                                             augmentation=False,
-                                             shuffle=True,
-                                             mode='validation',
-                                             event_representation=self.settings.event_representation,
-                                             temporal_window=self.settings.temporal_window,
-                                             delta_t=self.settings.delta_t)
-
-        self.nr_classes = test_dataset.nr_classes
-        self.object_classes = test_dataset.object_classes
-        self.nr_val_epochs = int(test_dataset.nr_samples / self.settings.batch_size) + 1
-     
-        self.test_loader = self.dataset_loader(test_dataset, batch_size=self.settings.batch_size,
-                                                device=self.settings.gpu_device, shuffle=False,
-                                                num_workers=self.settings.num_cpu_workers, pin_memory=False)
-        
-    def createRecurrentDatasets(self):
-        """
-        Creates the validation and the training data based on the lists specified in the config/settings.yaml file.
-        """
                  
-        test_dataset = self.dataset_builder(self.settings.dataset_path,
+        self.test_dataset = self.dataset_builder(self.settings.dataset_path,
                                              self.settings.object_classes,
                                              self.settings.height,
                                              self.settings.width,
@@ -123,14 +87,10 @@ class AbstractTrainer(abc.ABC):
                                              event_representation=self.settings.event_representation,
                                              recurrent_net=True)
 
-        self.nr_classes = test_dataset.nr_classes
-        self.object_classes = test_dataset.object_classes
-
-        self.nr_val_epochs = int(test_dataset.nr_samples / self.settings.batch_size) + 1
+        self.nr_classes = self.test_dataset.nr_classes
+        self.object_classes = self.test_dataset.object_classes
+        self.nr_val_epochs = int(self.test_dataset.nr_samples)
         
-        self.test_loader = self.dataset_loader(test_dataset, batch_size=self.settings.batch_size,
-                                                device=self.settings.gpu_device, shuffle=False,
-                                                num_workers=self.settings.num_cpu_workers, pin_memory=False)
 
 
     @staticmethod
@@ -157,25 +117,6 @@ class AbstractTrainer(abc.ABC):
         self.validation_accuracy = 0
         self.val_confusion_matrix = np.zeros([self.nr_classes, self.nr_classes])
 
-    def saveValidationStatistics(self):
-        """Saves the recorded validation statistics to an event file (tensorboard)"""
-        self.writer.add_scalar('Validation/Validation_Loss', self.validation_loss, self.epoch_step)
-        self.writer.add_scalar('Validation/Validation_Accuracy', self.validation_accuracy, self.epoch_step)
-
-        self.val_confusion_matrix = self.val_confusion_matrix / (np.sum(self.val_confusion_matrix, axis=-1,
-                                                                        keepdims=True) + 1e-9)
-        plot_confusion_matrix = visualizations.visualizeConfusionMatrix(self.val_confusion_matrix)
-        self.writer.add_image('Validation/Confusion_Matrix', plot_confusion_matrix, self.epoch_step,
-                              dataformats='HWC')
-
-    def storeLossesObjectDetection(self, loss_list):
-        """Writes the different losses to tensorboard"""
-        loss_names = ['Overall_Loss', 'Offset_Loss', 'Shape_Loss', 'Confidence_Loss', 'Confidence_NoObject_Loss',
-                      'Class_Loss']
-
-        for i_loss in range(len(loss_list)):
-            loss_value = loss_list[i_loss].data.cpu().numpy()
-            self.writer.add_scalar('TrainingLoss/' + loss_names[i_loss], loss_value, self.batch_step)
 
     def saveBoundingBoxes(self, gt_bbox, detected_bbox):
         """
@@ -223,8 +164,6 @@ class AbstractTrainer(abc.ABC):
         mAP = acc_AP / self.nr_classes
         self.validation_accuracy = mAP
 
-        self.writer.add_scalar('Validation/Validation_Loss', self.validation_loss, self.epoch_step)
-        self.writer.add_scalar('Validation/Validation_mAP', self.validation_accuracy, self.epoch_step)
 
     def getLearningRate(self):
         for param_group in self.optimizer.param_groups:
@@ -333,7 +272,7 @@ class SparseObjectDetModel(AbstractTrainer):
         except KeyError:
             pretrained_dict = checkpoint['model']
 
-        self.model.load_state_dict(pretrained_dict)
+        self.model.load_state_dict(pretrained_dict, strict=False)
 
     def evaluate(self):
         """Main training and validation loop"""
@@ -348,62 +287,69 @@ class SparseObjectDetModel(AbstractTrainer):
         self.model = self.model.eval()
         self.bounding_boxes = BoundingBoxes()
         loss_function = yoloLoss
-        # Images are upsampled for visualization
-        val_images = np.zeros([2, int(self.model_input_size[0]*1.5), int(self.model_input_size[1]*1.5), 3])
-
-        for i_batch, sample_batched in enumerate(self.test_loader):
+        self.last_ts_max = 0
+        self.val_stats = []
+        self.total_val_acc = 0
+        self.num_files = 0
+        
+        prev_states = None
+        
+        for i_batch, sample_batched in enumerate(self.test_dataset):
             event, bounding_box, histogram = sample_batched
 
-            # Convert spatial dimension to model input size
-            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2),
-                                                        torch.Size(self.model_input_size))
+            if (self.last_ts_max - np.min(event[:,2]))/1e6 > 50:
+                self.saveValidationStatisticsObjectDetection()
+                self.val_stats.append([self.test_dataset.files[i_batch-1][0], self.validation_accuracy])
+                self.total_val_acc += self.validation_accuracy
+                self.num_files += 1
+                self.resetValidation()
+                self.bounding_boxes = BoundingBoxes()
+                print("NEW VIDEO")
+            self.last_ts_max = np.max(event[:,2])
+
+            histogram = torch.from_numpy(histogram[np.newaxis, :, :])
+            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(self.model_input_size))
             histogram = histogram.permute(0, 2, 3, 1)
 
             # Change x, width and y, height
+            
+            bounding_box = torch.from_numpy(np.expand_dims(bounding_box, axis=0))
             bounding_box[:, :, [0, 2]] = (bounding_box[:, :, [0, 2]] * self.model_input_size[1].float()
                                           / self.settings.width).long()
             bounding_box[:, :, [1, 3]] = (bounding_box[:, :, [1, 3]] * self.model_input_size[0].float()
                                           / self.settings.height).long()
             locations, features = self.denseToSparse(histogram)
-
+            gt_bbox = bounding_box.cpu().numpy()
             with torch.no_grad():
-                model_output = self.model([locations, features, histogram.shape[0]])
-                loss = loss_function(model_output, bounding_box, self.model_input_size)[0]
-                detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
-                                           threshold=yolo_thresh)
-                detected_bbox = nonMaxSuppression(detected_bbox, iou=iou)
-                detected_bbox = detected_bbox.cpu().numpy()
+                if np.count_nonzero(gt_bbox) != 0:
 
-            # Save validation statistics
-            self.saveBoundingBoxes(bounding_box.cpu().numpy(), detected_bbox)
+                    model_output = self.model([locations, features, histogram.shape[0]])
 
-            self.pbar.set_postfix(ValLoss=loss.data.cpu().numpy())
-            self.pbar.update(1)
-            self.val_batch_step += 1
-            self.validation_loss += loss
+                    detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
+                                               threshold=yolo_thresh)
+                    detected_bbox = nonMaxSuppression(detected_bbox, iou=iou)
+                    detected_bbox = detected_bbox.cpu().numpy()
 
-        self.validation_loss = self.validation_loss / float(self.val_batch_step)
+                    # Save validation statistics
+                    self.saveBoundingBoxes(gt_bbox, detected_bbox)
+                    self.val_batch_step += 1
+
+                self.pbar.update(1)
+
         self.saveValidationStatisticsObjectDetection()
-        self.writer.add_image('Validation/Input Histogram', val_images, self.epoch_step, dataformats='NHWC')
-
-        print("ValAcc: " + str(self.validation_accuracy))
-        print("ValLoss: " + str(self.validation_loss))
-
-        self.pbar.close()
+        self.val_stats.append([self.test_dataset.files[i_batch-1][0], self.validation_accuracy])
+        self.total_val_acc += self.validation_accuracy
+        self.num_files += 1
+        self.total_val_acc = self.total_val_acc / self.num_files
+        np.savetxt('results.txt', np.array(self.val_stats), delimiter=',', fmt='%s')
+        print("ValAcc: " + str(self.total_val_acc))
 
 
 class SparseRecurrentObjectDetModel(AbstractTrainer):
     def buildModel(self):
         """Creates the specified model"""
-        if self.settings.model_name == 'sparse_REDnet':
-            self.model = REDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
 
-        elif self.settings.model_name == 'custom_sparse_REDnetv1':
-            self.model = customREDnetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
-                                       small_out_map=(self.settings.dataset_name == 'N_AU_DR'))
-
-        elif self.settings.model_name == 'sparse_firenet':
+        if self.settings.model_name == 'sparse_firenet':
             self.model = FirenetSparseObjectDet(self.nr_classes, nr_input_channels=self.nr_input_channels,
                                        small_out_map=(self.settings.dataset_name == 'N_AU_DR'),
                                        freeze_layers=True)
@@ -416,11 +362,6 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
                                              self.settings.dataset_name == 'N_AU_DR'):
             self.loadPretrainedWeights()
             
-        # Variables for Truncated Backpropagation Through Time
-        self.TBPTT = True
-        self.k1 = 10
-        self.k2 = 20
-        self.retain_graph = self.k1 < self.k2
 
     def loadPretrainedWeights(self):
         """Loads pretrained model weights"""
@@ -445,23 +386,35 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
         self.model = self.model.eval()
         self.bounding_boxes = BoundingBoxes()
         loss_function = yoloLoss
+        self.last_ts_max = 0
+        self.val_stats = []
+        self.total_val_acc = 0
+        self.num_files = 0
         
         prev_states = None
         
-        # Images are upsampled for visualization
-        val_images = np.zeros([2, int(self.model_input_size[0]*1.5), int(self.model_input_size[1]*1.5), 3])
-
-        for i_batch, sample_batched in enumerate(self.test_loader):
+        for i_batch, sample_batched in enumerate(self.test_dataset):
             event, bounding_box, histogram = sample_batched
-            if histogram.shape[0] < self.settings.batch_size:
-                continue
 
-            # Convert spatial dimension to model input size
-            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2),
-                                                        torch.Size(self.model_input_size))
+            if (self.last_ts_max - np.min(event[:,2]))/1e6 > 50:
+                self.saveValidationStatisticsObjectDetection()
+                self.val_stats.append([self.test_dataset.files[i_batch-1][0], self.validation_accuracy])
+                self.total_val_acc += self.validation_accuracy
+                self.num_files += 1
+                self.resetValidation()
+                self.bounding_boxes = BoundingBoxes()
+                prev_states = None
+                print("NEW VIDEO")
+            self.last_ts_max = np.max(event[:,2])
+
+
+            histogram = torch.from_numpy(histogram[np.newaxis, :, :])
+            histogram = torch.nn.functional.interpolate(histogram.permute(0, 3, 1, 2), torch.Size(self.model_input_size))
             histogram = histogram.permute(0, 2, 3, 1)
 
             # Change x, width and y, height
+            
+            bounding_box = torch.from_numpy(np.expand_dims(bounding_box, axis=0))
             bounding_box[:, :, [0, 2]] = (bounding_box[:, :, [0, 2]] * self.model_input_size[1].float()
                                           / self.settings.width).long()
             bounding_box[:, :, [1, 3]] = (bounding_box[:, :, [1, 3]] * self.model_input_size[0].float()
@@ -470,27 +423,27 @@ class SparseRecurrentObjectDetModel(AbstractTrainer):
 
             with torch.no_grad():
                 
-                model_output, new_states = self.model([locations, features, histogram.shape[0]], prev_states)
-                prev_states = new_states
+                model_output, prev_states = self.model([locations, features, histogram.shape[0]], prev_states)
                 
                 gt_bbox = bounding_box.cpu().numpy()
                 if np.count_nonzero(gt_bbox) != 0:
                                    
-                    loss = loss_function(model_output, bounding_box, self.model_input_size)[0]
                     detected_bbox = yoloDetect(model_output, self.model_input_size.to(model_output.device),
                                                threshold=yolo_thresh)
                     detected_bbox = nonMaxSuppression(detected_bbox, iou=iou)
                     detected_bbox = detected_bbox.cpu().numpy()
                     
                     self.saveBoundingBoxes(gt_bbox, detected_bbox)
-                    self.validation_loss += loss
                     self.val_batch_step += 1
-                    self.pbar.set_postfix(ValLoss=loss.data.cpu().numpy())
                 self.pbar.update(1)
 
-        self.validation_loss = self.validation_loss / float(self.val_batch_step)
         self.saveValidationStatisticsObjectDetection()
-        print("ValAcc: " + str(self.validation_accuracy))
+        self.val_stats.append([self.test_dataset.files[i_batch-1][0], self.validation_accuracy])
+        self.total_val_acc += self.validation_accuracy
+        self.num_files += 1
+        self.total_val_acc = self.total_val_acc / self.num_files
+        np.savetxt('results.txt', np.array(self.val_stats), delimiter=',', fmt='%s')
+        print("ValAcc: " + str(self.total_val_acc))
 
         self.pbar.close()
 
@@ -576,14 +529,12 @@ class DenseObjectDetModel(AbstractTrainer):
                                                          ground_truth=False, rescale_image=False)
                 val_images[int(self.val_batch_step // (self.nr_val_epochs - 2))] = image
 
-            self.pbar.set_postfix(ValLoss=loss.data.cpu().numpy())
             self.pbar.update(1)
             self.val_batch_step += 1
             self.validation_loss += loss
 
         self.validation_loss = self.validation_loss / float(self.val_batch_step)
         self.saveValidationStatisticsObjectDetection()
-        self.writer.add_image('Validation/Input Histogram', val_images, self.epoch_step, dataformats='NHWC')
 
         if self.max_validation_accuracy < self.validation_accuracy:
             self.max_validation_accuracy = self.validation_accuracy

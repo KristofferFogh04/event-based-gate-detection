@@ -23,7 +23,8 @@ dataset:
     width: 304
     nr_events_window: 25000
   n_au_dr:
-    dataset_path: "/media/kristoffer/Kristoffer/Datasets/N-AU-DR_combined_hifreq" #"/home/kristoffer/event-based-gate-detection/N-AU-DR" 
+    dataset_path: "/media/kristoffer/Kristoffer/Datasets/N-AU-DR_real2" #"/home/kristoffer/event-based-gate-detection/N-AU-DR" 
+    test_dataset_path: "/media/kristoffer/Kristoffer/Datasets/N-AU-DR_real"
     object_classes: 'all'
     height: 180
     width: 240
@@ -38,7 +39,7 @@ model:
   model_name: 'sparse_firenet' #'fb_sparse_object_det'
   #model_name: 'fb_sparse_object_det'
 optim:
-  batch_size: 15
+  batch_size: 1
   init_lr: 1e-4
   # Set to "steps: ~" if no scheduler is needed
   steps_lr: [500, 1000, 1500]
@@ -48,11 +49,11 @@ checkpoint:
   resume_file: ''
   # Networks trained for classification can be reused as starting point for object detection networks on trained
   # the same dataset
-  use_pretrained: False
+  use_pretrained: True
   pretrained_dense_vgg: ''
   #pretrained_sparse_vgg: 'log/fb_sparse_obj_det_run3_97/checkpoints/model_step_125.pth'
-  #pretrained_sparse_vgg: 'log/RNN_TBPTT_trained_run4_93/checkpoints/model_step_15.pth'
-  pretrained_sparse_vgg: 'log/RNN_TBPTT_trained_run5_manyepochs_93/checkpoints/model_step_39.pth' 
+  pretrained_sparse_vgg: 'log/RNN_k1_20_transfer_valacc98/checkpoints/model_step_7.pth'
+  #pretrained_sparse_vgg: 'log/RNN_sequential_combineddataset_98val_15test/checkpoints/model_step_17.pth' 
 hardware:
   # num_cpu_workers: {-1: auto, 0: main thread, >0: ...}
   num_cpu_workers: 0
