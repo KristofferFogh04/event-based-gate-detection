@@ -4,6 +4,7 @@ This is the code for the master thesis titled Event-based Gate Detection
 
 This repository is largely based on the repository rpg_asynet published by uzh-rpg:
 https://github.com/uzh-rpg/rpg_asynet
+and the authors receive full credit for the source code.
 
 
 ## Installation
